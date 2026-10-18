@@ -65,9 +65,9 @@ def to_usd(bs: Decimal, rate: Decimal) -> Decimal:
     return round_cents(bs / rate)
 
 
-def split_by_weights(total: Decimal, weights: Sequence[int]) -> list[Decimal]:
-    """Split an amount proportionally to whole weights; the rounding remainder goes last."""
-    whole = sum(weights)
+def split_by_weights(total: Decimal, weights: Sequence[int | Decimal]) -> list[Decimal]:
+    """Split an amount proportionally to the weights; the rounding remainder goes last."""
+    whole = sum(weights, Decimal(0))
     parts = [round_cents(total * weight / whole) for weight in weights[:-1]]
     return [*parts, total - sum(parts, Decimal(0))]
 
@@ -114,6 +114,20 @@ def box_status_for(remaining: int, has_movements: bool) -> BoxStatus:
     if has_movements:
         return BoxStatus.OPEN
     return BoxStatus.STOCKED
+
+
+_CONSUMPTION_ORDER = {
+    BoxStatus.SETTLED: 0,
+    BoxStatus.FINISHED: 0,
+    BoxStatus.OPEN: 1,
+    BoxStatus.STOCKED: 2,
+}
+
+
+def is_fifo_sequence(statuses_by_number: Sequence[BoxStatus]) -> bool:
+    """Boxes empty strictly oldest first: done boxes, then at most one open, then untouched."""
+    ranks = [_CONSUMPTION_ORDER[status] for status in statuses_by_number]
+    return ranks == sorted(ranks) and ranks.count(1) <= 1
 
 
 def check_box_transition(current: BoxStatus, target: BoxStatus) -> None:

@@ -121,7 +121,7 @@ class Box(Base):
     finished_on: Mapped[date | None]
     settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id"), index=True)
 
-    purchase: Mapped[Purchase] = relationship(back_populates="boxes")
+    purchase: Mapped[Purchase] = relationship(back_populates="boxes", lazy="joined")
 
     __table_args__ = (
         Index(

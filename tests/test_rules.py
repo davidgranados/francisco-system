@@ -143,3 +143,12 @@ def test_reserve() -> None:
 
 def test_spanish_number_format() -> None:
     assert rules.format_usd(D("17176.5")) == "$ 17.176,50"
+
+
+def test_fifo_sequence_of_box_statuses() -> None:
+    done, open_, new = BoxStatus.FINISHED, BoxStatus.OPEN, BoxStatus.STOCKED
+    assert rules.is_fifo_sequence([BoxStatus.SETTLED, done, open_, new, new])
+    assert rules.is_fifo_sequence([done, new])
+    assert not rules.is_fifo_sequence([new, open_])
+    assert not rules.is_fifo_sequence([open_, open_])
+    assert not rules.is_fifo_sequence([open_, done])

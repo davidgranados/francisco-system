@@ -49,6 +49,24 @@ uv run ruff format --check . && uv run ruff check .
 
 Las pruebas crean una base `francisco_test` en el mismo Postgres (se puede cambiar con `TEST_DATABASE_URL`), le aplican las migraciones y no salen a internet: la tasa BCV y Anthropic se reemplazan por dobles.
 
+## El eval del bot
+
+`evals/casos.yaml` tiene 58 conversaciones de socios (ventas, compras, gastos, rotos, conteos, tasa, aportes, consultas, el cierre con sus botones, correcciones, mensajes a los que les falta un dato, charla que no es del negocio y casos tramposos). Cada caso dice de qué estado arranca, qué herramientas tiene que llamar el bot, qué no puede hacer, cómo tiene que quedar la base y qué tiene que decir la respuesta. Se califica sin modelo: llamadas, base de datos y palabras.
+
+Para comparar modelos con la API real (gasta tokens):
+
+```bash
+docker compose up -d
+export ANTHROPIC_API_KEY=...
+uv run python -m evals.run --model claude-haiku-5-5 --model claude-sonnet-5-5 --repeat 3
+```
+
+Imprime, por modelo, cuántas corridas pasaron (en total y por categoría), los tokens promedio de entrada, salida y cache, el costo estimado en USD por conversación y la latencia p50/p95 por turno, y guarda el detalle con las conversaciones en `evals/resultados/` (no se sube al repositorio). Sale con código 1 si algún modelo pasa menos del 90 % (`--threshold 0.8` para cambiarlo). Otras opciones: `--case venta_pago_movil` o `--category cierre` para correr una parte, `--effort low` y `--thinking off` para probar otra configuración, `--concurrency 4`.
+
+`uv run python -m evals.run --golden` corre todo sin red con un cliente guionado que hace lo que cada caso espera. Sirve para comprobar que el eval funciona; la prueba `tests/test_evals.py` lo hace en cada `pytest`. Cada corrida usa una base nueva clonada de `francisco_eval_plantilla` (se cambia con `EVAL_DATABASE_URL`).
+
+Lo que se investigó para preparar el bot para Haiku, con las fuentes, está en `docs/investigacion-haiku.md`.
+
 ## Desplegar en Railway, paso a paso
 
 La app es un solo servicio con su `Dockerfile` y una base PostgreSQL de Railway. No usa `railway.toml` (Railway lo dejó de aceptar para servicios nuevos); todo se configura en el panel.
@@ -88,7 +106,9 @@ En el servicio de la app, **Variables**:
 | `TELEGRAM_WEBHOOK_SECRET` | el secreto del paso 1 |
 | `PUBLIC_URL` | `https://<dominio del paso 3>`, sin barra final. Si no se pone, la app usa `RAILWAY_PUBLIC_DOMAIN`, que Railway agrega cuando el servicio tiene dominio |
 | `ANTHROPIC_API_KEY` | su clave de la consola de Anthropic |
-| `ANTHROPIC_MODEL` | opcional, por defecto `claude-sonnet-5-5` |
+| `ANTHROPIC_MODEL` | opcional, por defecto `claude-sonnet-5-5`. `claude-haiku-5-5` cuesta unas 20 veces menos; corra el eval antes de cambiarlo |
+| `ANTHROPIC_EFFORT` | opcional: `low`, `medium`, `high`, `xhigh` o `max`. Vacío es `medium` |
+| `ANTHROPIC_THINKING` | opcional: `adaptive` (por defecto) u `off` (solo con esfuerzo hasta `high`) |
 | `MARKUP` | opcional, por defecto `0.25` |
 | `TIMEZONE` | opcional, por defecto `America/Caracas` (define qué es "hoy") |
 
@@ -130,19 +150,21 @@ DATABASE_URL="<DATABASE_PUBLIC_URL>" uv run python -m app.seed "Socio A:0.60:123
 Se le habla normal. Algunos ejemplos:
 
 - "Hoy compré 2 cajas a 63 en efectivo dólares, en Granja X."
-- "Vendí 3 cartones y 4 huevos, pago móvil."
-- "Se rompieron 3 huevos."
-- "Gasté 1,50 en transporte, lo pagué yo."
+- "Vendí 3 cartones y 4 sueltos, pago móvil." o "Me compraron la caja completa por punto."
+- "Se partieron 3." o "Le di 2 de ñapa a la vecina."
+- "Pagué yo el transporte, 1,50." o "Pagué 350 Bs de bolsas con plata del negocio."
+- "Conté y hay 8 cartones y 6 sueltos."
 - "¿Cuántos huevos quedan?" o "Pásame la lista de precios de hoy."
 - "¿Cuánto ganó la caja 1?"
-- "Hagamos el cierre." El bot muestra la vista previa con el reparto y solo guarda el cierre cuando usted confirma.
+- "¿Cuánto nos toca?" El bot muestra el cierre con el reparto y dos botones, Confirmar y Cancelar. Solo se guarda cuando el socio que lo pidió toca Confirmar; escribir "sí" no lo guarda. Los botones sirven una sola vez y vencen a los 15 minutos.
 
-`/nuevo` borra la conversación con el bot (no borra ningún registro). Anular una venta o una compra también pide confirmación.
+Anular una venta o una compra funciona igual, con botones. Si al bot le falta un dato (por ejemplo cómo le pagaron), pregunta antes de anotar. `/nuevo` borra la conversación con el bot (no borra ningún registro).
 
 ## Estructura
 
 - `app/domain/rules.py`: las reglas puras (precios, redondeo, PEPS, reparto, estados de la caja).
 - `app/services/`: toda la lógica del negocio. La API y el bot llaman a las mismas funciones.
 - `app/api/`: un router por servicio bajo `/api/v1`.
-- `app/agent/`: el registro de herramientas, el bucle con Claude, el prompt y el webhook de Telegram.
+- `app/agent/`: las herramientas del bot, el bucle con Claude, el prompt, las acciones que esperan el botón Confirmar y el webhook de Telegram.
+- `evals/`: los casos del eval y el programa que los corre.
 - `alembic/`: migraciones. `app/seed.py`: carga de socios.

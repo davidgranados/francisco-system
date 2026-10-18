@@ -8,7 +8,7 @@ App a medida para el negocio de reventa de huevos descrito en `docs/cuaderno.md`
 - FastAPI 0.146, uvicorn, pydantic 2, pydantic-settings.
 - SQLAlchemy 2.1 async + asyncpg, Alembic (plantilla async). Dinero en `Numeric`, nunca float.
 - python-telegram-bot 22 en modo webhook dentro de la app FastAPI (`updater(None)`), con `secret_token`.
-- anthropic SDK, bucle manual de tool use sobre `messages.create`, modelo configurable (`claude-sonnet-5-5` por defecto), prompt caching en tools + system.
+- anthropic SDK, bucle manual de tool use sobre `messages.create`, modelo configurable (`claude-sonnet-5-5` por defecto; preparado para `claude-haiku-5-5`, ver `docs/investigacion-haiku.md`), *thinking* y esfuerzo explícitos en cada request, prompt caching en tools + system.
 - httpx para la tasa BCV (`https://ve.dolarapi.com/v1/dolares/oficial`, campo `promedio`).
 - Railway: Dockerfile (railway.toml está deprecado para servicios nuevos). Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Pre-deploy: `alembic upgrade head`. Healthcheck `/healthz`.
 
@@ -48,13 +48,14 @@ finished ──(entra en un cierre)──▶ settled
 - `exchange_rates`: fecha (única), tasa (Numeric 14,4), fuente (`bcv_api` | `manual`). Si la API falla se usa la última tasa guardada y se dice.
 - `purchases`: fecha, proveedor, cantidad de cajas, costo por caja USD, tasa, total USD, total Bs, forma de pago, quién pagó (negocio o socio), nota.
 - `boxes`: número (único, secuencial), purchase_id, costo USD, precios propios (caja, cartón, medio, unidad), status, fechas de apertura y agotamiento, settlement_id.
-- `sales`: fecha, tasa, cartones, medios, unidades, monto USD, monto Bs, forma de pago, cliente opcional, nota, anulada (bool + motivo). Una venta nunca se borra, se anula.
+- `sales`: fecha, tasa, cajas completas, cartones, medios, unidades, monto USD, monto Bs, forma de pago, cliente opcional, nota, anulada (bool + motivo). Una venta nunca se borra, se anula.
 - `egg_movements`: el libro del inventario. box_id, fecha, tipo (`sale` | `broken` | `shrinkage` | `gift`), huevos (>0), monto USD (solo ventas), sale_id o count_id. Una venta que cruza dos cajas genera un movimiento por caja; el monto se reparte por huevos y el resto del redondeo va al último movimiento.
 - `inventory_counts`: fecha, huevos esperados, huevos contados, diferencia. La diferencia negativa genera un movimiento `shrinkage` en la caja abierta.
 - `expenses`: fecha, concepto, monto USD, tasa, monto Bs, pagado por (negocio o socio_id), devuelto_en (fecha o null), settlement_id.
 - `contributions` (aportes): socio, fecha, monto USD, nota. Nunca se mezclan con la ganancia.
 - `settlements` (cierres): fecha, ganancia de cajas, gastos, reserva, ganancia neta, tasa, monto Bs, dinero para la próxima caja, nota. `settlement_shares`: socio, porcentaje, monto.
 - `conversation_messages`: chat_id, rol, contenido JSON, fecha. Historial del agente; se mandan los últimos 30.
+- `pending_actions`: un cierre o una anulación que el modelo preparó y espera el botón Confirmar. chat_id, socio, herramienta, argumentos, vista previa, vence_a, resuelta_a y resultado (`confirmed`, `cancelled`, `superseded`, `expired`, `changed`, `failed`).
 - `processed_updates`: update_id de Telegram, para no procesar dos veces un reintento.
 
 ### Formas de pago
@@ -85,9 +86,9 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 
 - `rates`: obtener o crear la tasa de un día; fijarla a mano.
 - `purchases`: registrar compra (crea cajas con precios), anular compra si ninguna caja se tocó.
-- `sales`: registrar venta (cartones, medios, unidades, forma de pago, fecha opcional, monto cobrado opcional para descuentos), reparte en cajas PEPS, rechaza si no hay huevos. Anular venta.
+- `sales`: registrar venta (cajas, cartones, medios, unidades, forma de pago, fecha opcional, monto cobrado opcional para descuentos), reparte en cajas PEPS, rechaza si no hay huevos. Anular venta.
 - `inventory`: registrar rotos o regalados, conteo físico, existencias (huevos, cajas, por caja), costo promedio.
-- `expenses`: registrar gasto, marcar devuelto, listar pendientes.
+- `expenses`: registrar gasto (en $ o en Bs; los Bs se pasan a $ con la tasa del día), marcar devuelto, listar pendientes.
 - `pricing`: lista de precios del día en USD y Bs (Plantilla A), ajustar precios de una caja.
 - `boxes`: hoja de una caja (Plantilla C) y su ganancia (Plantilla G).
 - `settlements`: vista previa del cierre (Plantilla H) y ejecutar el cierre.
@@ -100,16 +101,23 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 
 ## Agente
 
-- Registro de herramientas en `app/agent/tools.py`: una tabla de `Tool(name, description, input_model, handler)`. El JSON schema sale del modelo Pydantic. Un solo despachador valida la entrada con Pydantic y llama al servicio. No hay if/else por herramienta.
-- Herramientas que escriben datos y no se pueden deshacer fácil (`ejecutar_cierre`, `anular_venta`, `anular_compra`) exigen `confirmado: true`. El system prompt le dice al modelo que primero muestre la vista previa y pida confirmación.
-- System prompt en español: explica el negocio, las unidades, la regla de la próxima caja, cómo hablar (corto, en español venezolano, montos en $ y Bs). La fecha y la tasa del día van en el mensaje del usuario, no en el system, para no romper el cache.
-- Bucle: hasta 10 rondas de tool use; cada resultado de herramienta vuelve como JSON. Un `DomainError` vuelve como `is_error`.
+El modelo elige herramientas y llena campos; toda cuenta la hace el código. Las decisiones y sus fuentes están en `docs/investigacion-haiku.md`.
+
+- **Herramientas** (`app/agent/tools.py`): 14, en una tabla `Tool(nombre, descripción, modelo de entrada, handler, tipo, ejemplos)` con un solo despachador. Tipos: lectura, escritura y confirmación. Escrituras: `registrar_venta`, `registrar_compra`, `registrar_gasto`, `registrar_merma`, `registrar_conteo`, `registrar_aporte`, `fijar_tasa`, `ajustar_precios`, `marcar_gasto_devuelto`. Confirmación: `preparar_cierre`, `preparar_anulacion`. Lecturas: `consultar` (un `enum` de qué mostrar), `ver_caja`, `resumen`.
+- **Esquemas planos y strict.** Cada herramienta tiene su modelo de entrada en la frontera, con nombres de campo en español como hablan los socios (cartones, medios, sueltos, pagado_por) y separado de los modelos de los servicios. Todo campo es un escalar o un `enum`: sin `$ref`, sin `anyOf`, sin objetos anidados. El dinero es un string con `pattern` que acepta coma o punto decimal y se convierte a `Decimal` en el código. Los opcionales tienen valor por defecto en vez de `null`. El generador quita `minimum`, `maxLength` y parecidos (strict los rechaza; Pydantic los sigue validando) y se niega a generar algo anidado. Todas van con `strict: true` y las de escritura con `input_examples`. Un test verifica que el conjunto cabe en los límites de strict (20 herramientas, 24 opcionales, 16 uniones).
+- **Valores que resuelve el código.** `forma_pago` y `pagado_por` aceptan `no_dijo`, que el despachador rechaza pidiendo que se pregunte: con strict el modelo siempre llena el campo, y así no tiene que inventar. `yo` en `pagado_por` o `socio` es quien escribe. Cajas, cartones, medios y sueltos van en campos enteros separados y el código los multiplica. Un nombre de herramienta con otra capitalización se acepta; uno desconocido devuelve la lista de nombres.
+- **Confirmación con botones.** `preparar_cierre` y `preparar_anulacion` ejecutan la operación dentro de una transacción que se deshace, guardan argumentos y resultado como acción pendiente y devuelven la vista previa. El bot pone Confirmar y Cancelar (inline keyboard de Telegram, `CallbackQueryHandler`) debajo de la respuesta. Confirmar vuelve a ejecutar el mismo handler, ahora de verdad, solo si: lo toca el socio que la pidió, no se usó antes (se toma con `SELECT ... FOR UPDATE`), no venció (15 minutos), no la reemplazó una vista previa más nueva del mismo chat y el resultado es igual a la vista previa (si cambió algo, se rechaza). Después el modelo recibe una nota "[Botón Confirmar]" con el resultado para contarlo y seguir.
+- **System prompt** (`app/agent/prompt.py`): secciones XML (`negocio`, `como_trabajar`, `confirmaciones`, `como_hablar`, `ejemplos`) con seis ejemplos de frase → llamada, varios con palabras venezolanas. La fecha (también en ISO), el lunes de la semana, la tasa y quién escribe van en el mensaje del usuario, no en el system, para no romper el cache.
+- **Thinking y esfuerzo** (`app/agent/options.py`): cada request manda `thinking` y `output_config.effort`. Por defecto *adaptive* con esfuerzo `medium` en Haiku 5.5 y Sonnet 5.5. `ANTHROPIC_EFFORT` y `ANTHROPIC_THINKING` lo cambian; `off` es `disabled` en Haiku y `between_tools` en Sonnet 5.5, y se rechaza al arrancar por encima de `high`. `tool_choice` queda en `auto`.
+- **Bucle**: hasta 10 rondas de tool use; cada resultado vuelve como JSON. Un `DomainError` o datos inválidos vuelven como `is_error`. Un `stop_reason` de `refusal` tiene su propia respuesta.
 - El historial se guarda por chat. Comando `/nuevo` lo borra. Comando `/start` saluda.
-- Las respuestas largas se parten en mensajes de 4096 caracteres.
+- Las respuestas largas se parten en mensajes de 4096 caracteres; los botones van en el último.
 
 ## Pruebas
 
-pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho y el bucle sin red.
+pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho, el bucle y los botones sin red.
+
+El eval del producto está en `evals/`: 58 casos en `casos.yaml` que arrancan de fixtures construidos con los servicios, se corren contra la API real con `uv run python -m evals.run` y se califican sin modelo (llamadas, estado de la base, palabras de la respuesta). `--golden` y `tests/test_evals.py` corren todos los casos con un cliente guionado: prueban el programa y que el estado esperado de cada caso sale de sus llamadas esperadas.
 
 ## Decisiones de implementación
 
@@ -122,4 +130,6 @@ Puntos que el diseño dejaba abiertos y cómo quedaron en el código.
 - **Cierre vacío.** Si no hay cajas cerrables ni gastos pendientes, el cierre se rechaza.
 - **Historial del agente.** Se guardan los mensajes sin los bloques de *thinking*: la ventana de 30 mensajes recorta el principio del historial, y la API invalida un bloque de *thinking* cuando cambia lo que va antes de él. Dentro de una misma respuesta los bloques sí se devuelven tal cual.
 - **Telegram que no arranca.** Si Telegram rechaza el token o no responde al iniciar, se registra el error y la API sigue funcionando con el bot apagado.
-- **Campos de las herramientas.** Los esquemas salen de los mismos modelos de entrada de los servicios, con nombres de campo en inglés y descripciones en español. La confirmación se llama `confirmado` en el esquema, como dice el diseño.
+- **Campos de las herramientas.** Al principio los esquemas salían de los modelos de entrada de los servicios, en inglés, y la confirmación era un campo `confirmado`. Se cambió por modelos propios del agente en español y por botones (ver Agente): 28 herramientas no cabían en el límite de strict, los esquemas de Pydantic traían `anyOf` y `minimum` que strict rechaza, y un cierre no debe depender de que el modelo lea bien un "sí".
+- **Caja completa.** Una venta puede llevar cajas completas, cobradas al precio de caja. Antes una caja se anotaba como 12 cartones, que con el redondeo hacia arriba cuesta más ($ 79,20 contra $ 78,75 en una caja de 63).
+- **Hoy en los evals.** `today()` se puede fijar por contexto (`frozen_today`) para que los fixtures del eval repitan las fechas de la Parte 9; en producción no se usa.

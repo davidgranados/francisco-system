@@ -80,7 +80,7 @@ Decisión **[inferido]**: ejemplos en las herramientas de escritura donde hay co
 - "Provide extremely detailed descriptions. This is by far the most important factor in tool performance ... When it should be used (and when it shouldn't) ... Aim for at least 3–4 sentences for each tool description." **[fuente]** define-tools.
 - "More tools don't always lead to better outcomes", evitar herramientas que solo envuelven un endpoint, nombres de parámetros sin ambigüedad, devolver solo información de alta señal. **[fuente]** https://www.anthropic.com/engineering/writing-tools-for-agents
 
-Decisión **[inferido]**: no usar *tool search*. Con 14 herramientas y unos pocos miles de tokens de definiciones cacheadas, buscar herramientas añadiría una ronda y un punto de fallo sin bajar costos que ya cubre el cache. Se consolida: las 11 lecturas sueltas pasan a `consultar` (con un `enum` de qué mostrar), `ver_caja` y `resumen`. Rotos y regalados ya estaban juntos. Anular venta y anular compra se juntan en `preparar_anulacion`. Total: de 28 a 14.
+Decisión **[inferido]**: no usar *tool search*. Con 14 herramientas y unos pocos miles de tokens de definiciones cacheadas, buscar herramientas añadiría una ronda y un punto de fallo sin bajar costos que ya cubre el cache. Se consolida: las 16 lecturas pasan a 3, `consultar` (con un `enum` de qué mostrar), `ver_caja` y `resumen`; la vista previa del cierre queda dentro de `preparar_cierre`. Rotos y regalados ya estaban juntos. Anular venta y anular compra se juntan en `preparar_anulacion`. Total: de 28 a 14.
 
 ## 8. Prompt para Haiku
 

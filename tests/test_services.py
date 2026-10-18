@@ -185,6 +185,17 @@ async def test_a_sale_needs_eggs(call: Call) -> None:
         await _sell(call, cartons=13)
 
 
+async def test_an_expense_paid_in_bolivares_is_converted_at_the_day_rate(call: Call) -> None:
+    await _rate(call)
+    expense = await call(
+        expenses.record_expense,
+        expenses.ExpenseInput(day=DAY, concept="Transporte", amount_bs=D("1316.85")),
+    )
+    assert (expense.amount_usd, expense.amount_bs) == (D("1.50"), D("1316.85"))
+    with pytest.raises(ValueError, match="uno de los dos"):
+        expenses.ExpenseInput(concept="Bolsas")
+
+
 async def test_a_whole_box_sale_uses_the_box_price_and_empties_the_box(call: Call) -> None:
     await _rate(call)
     await _buy(call, "63.00")

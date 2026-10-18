@@ -1,7 +1,8 @@
 from datetime import date
 from decimal import Decimal
+from typing import Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,11 +15,24 @@ from app.services import partners, rates
 
 class ExpenseInput(BaseModel):
     concept: str = Field(min_length=1, max_length=200)
-    amount_usd: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    amount_usd: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    amount_bs: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=14,
+        decimal_places=2,
+        description="Monto en Bs; se pasa a $ con la tasa del día del gasto",
+    )
     day: date | None = None
     paid_by_partner: str | None = Field(
         default=None, description="Socio que lo pagó de su bolsillo; vacío si pagó el negocio"
     )
+
+    @model_validator(mode="after")
+    def one_amount(self) -> Self:
+        if (self.amount_usd is None) == (self.amount_bs is None):
+            raise ValueError("indique el monto en $ o en Bs, uno de los dos")
+        return self
 
 
 class ReimburseInput(BaseModel):
@@ -57,12 +71,17 @@ async def record_expense(session: AsyncSession, data: ExpenseInput) -> ExpenseVi
     payer = (
         await partners.find_by_name(session, data.paid_by_partner) if data.paid_by_partner else None
     )
+    if data.amount_bs is not None:
+        amount_usd, amount_bs = rules.to_usd(data.amount_bs, rate.rate), data.amount_bs
+    else:
+        assert data.amount_usd is not None
+        amount_usd, amount_bs = data.amount_usd, rules.to_bs(data.amount_usd, rate.rate)
     expense = Expense(
         day=day,
         concept=data.concept,
-        amount_usd=data.amount_usd,
+        amount_usd=amount_usd,
         rate=rate.rate,
-        amount_bs=rules.to_bs(data.amount_usd, rate.rate),
+        amount_bs=amount_bs,
         paid_by_partner=payer,
     )
     session.add(expense)

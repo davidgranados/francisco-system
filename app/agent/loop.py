@@ -6,7 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.prompt import SYSTEM_PROMPT, user_turn
-from app.agent.tools import dispatch, tool_definitions
+from app.agent.tools import ToolContext, dispatch, tool_definitions
 from app.config import today
 from app.domain.errors import DomainError
 from app.models import ConversationMessage
@@ -99,12 +99,12 @@ class Agent:
             history = await load_history(session, chat_id)
             rate = await _rate_text(session)
         turn: list[Message] = [{"role": "user", "content": user_turn(text, today(), rate, speaker)}]
-        answer = await self._run(history, turn)
+        answer = await self._run(history, turn, ToolContext(speaker=speaker))
         async with self.session_factory() as session, session.begin():
             await save_messages(session, chat_id, turn)
         return answer
 
-    async def _run(self, history: list[Message], turn: list[Message]) -> str:
+    async def _run(self, history: list[Message], turn: list[Message], context: ToolContext) -> str:
         for _ in range(MAX_ROUNDS):
             response = await self.client.messages.create(
                 model=self.model,
@@ -122,7 +122,7 @@ class Agent:
             for block in response.content:
                 if block.type != "tool_use":
                     continue
-                outcome = await dispatch(block.name, block.input, self.session_factory)
+                outcome = await dispatch(block.name, block.input, self.session_factory, context)
                 results.append(
                     {
                         "type": "tool_result",

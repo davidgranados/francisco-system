@@ -53,6 +53,10 @@ def final(text: str) -> Message:
     return _message([TextBlock(type="text", text=text)], "end_turn")
 
 
+SOCIOS = {"que": "socios"}
+NO_EGGS = {"cajas": 0, "cartones": 0, "medios": 0, "sueltos": 0}
+
+
 def tool_results(call: dict[str, Any]) -> list[dict[str, Any]]:
     return call["messages"][-1]["content"]
 
@@ -74,7 +78,7 @@ async def test_the_loop_runs_a_tool_and_returns_the_final_text(call: Call) -> No
             box_count=1, cost_per_box_usd=D("60.00"), payment_method=PaymentMethod.CASH_USD
         ),
     )
-    client = FakeAnthropic(use("ver_existencias", {}), final("Quedan 360 huevos."))
+    client = FakeAnthropic(use("consultar", {"que": "existencias"}), final("Quedan 360 huevos."))
     agent = Agent(client, "claude-sonnet-5-5", SessionLocal)
 
     answer = await agent.reply(7, "Socio A", "¿cuántos huevos quedan?")
@@ -96,7 +100,8 @@ async def test_the_loop_runs_a_tool_and_returns_the_final_text(call: Call) -> No
 
 async def test_a_domain_error_goes_back_to_the_model_as_is_error() -> None:
     client = FakeAnthropic(
-        use("registrar_venta", {"cartons": 1, "payment_method": "punto"}), final("No hay huevos.")
+        use("registrar_venta", {**NO_EGGS, "cartones": 1, "forma_pago": "punto"}),
+        final("No hay huevos."),
     )
     await Agent(client, "m", SessionLocal).reply(7, "Socio A", "vendí un cartón por punto")
     [result] = tool_results(client.messages.calls[1])
@@ -107,8 +112,8 @@ async def test_a_domain_error_goes_back_to_the_model_as_is_error() -> None:
 @pytest.mark.parametrize(
     ("name", "arguments", "message"),
     [
-        ("registrar_venta", {"cartons": 1, "payment_method": "trueque"}, "Datos inválidos"),
-        ("registrar_venta", {"payment_method": "punto"}, "al menos un huevo"),
+        ("registrar_venta", {**NO_EGGS, "cartones": 1, "forma_pago": "trueque"}, "Datos inválidos"),
+        ("registrar_venta", {**NO_EGGS, "forma_pago": "punto"}, "al menos un huevo"),
         ("borrar_todo", {}, "No existe la herramienta"),
     ],
 )
@@ -127,13 +132,15 @@ async def test_ejecutar_cierre_needs_confirmado(call: Call) -> None:
     await call(
         expenses.record_expense, expenses.ExpenseInput(concept="Bolsas", amount_usd=D("0.40"))
     )
-    unconfirmed = FakeAnthropic(use("ejecutar_cierre", {}), final("¿Confirma?"))
+    unconfirmed = FakeAnthropic(use("ejecutar_cierre", {"reserva": "0"}), final("¿Confirma?"))
     await Agent(unconfirmed, "m", SessionLocal).reply(7, "Socio A", "haz el cierre")
     [refused] = tool_results(unconfirmed.messages.calls[1])
     assert (refused["is_error"], refused["content"]) == (True, tools.CONFIRMATION_REQUIRED)
     assert await call(settlements.list_settlements) == []
 
-    confirmed = FakeAnthropic(use("ejecutar_cierre", {"confirmado": True}), final("Listo."))
+    confirmed = FakeAnthropic(
+        use("ejecutar_cierre", {"reserva": "0", "confirmado": True}), final("Listo.")
+    )
     await Agent(confirmed, "m", SessionLocal).reply(7, "Socio A", "sí, confirmo")
     [done] = tool_results(confirmed.messages.calls[1])
     assert done["is_error"] is False
@@ -142,16 +149,15 @@ async def test_ejecutar_cierre_needs_confirmado(call: Call) -> None:
 
 
 def test_confirmation_tools_show_confirmado_in_their_schema() -> None:
-    for name in ("ejecutar_cierre", "anular_venta", "anular_compra"):
-        tool = tools.REGISTRY[name]
-        assert tool.requires_confirmation
-        assert "confirmado" in tool.definition()["input_schema"]["properties"]
+    for name in ("ejecutar_cierre", "anular"):
+        assert "confirmado" in tools.REGISTRY[name].definition()["input_schema"]["properties"]
 
 
 async def test_history_carries_over_without_thinking_blocks() -> None:
     thinking = ThinkingBlock(type="thinking", thinking="", signature="firma")
     tool_turn = _message(
-        [thinking, ToolUseBlock(type="tool_use", id="t1", name="ver_socios", input={})], "tool_use"
+        [thinking, ToolUseBlock(type="tool_use", id="t1", name="consultar", input=SOCIOS)],
+        "tool_use",
     )
     client = FakeAnthropic(tool_turn, final("Sin socios."), final("De nada."))
     agent = Agent(client, "m", SessionLocal)
@@ -167,7 +173,7 @@ async def test_history_carries_over_without_thinking_blocks() -> None:
 
 
 async def test_the_loop_stops_after_ten_rounds() -> None:
-    client = FakeAnthropic(*(use("ver_socios", {}, f"t{i}") for i in range(10)))
+    client = FakeAnthropic(*(use("consultar", SOCIOS, f"t{i}") for i in range(10)))
     answer = await Agent(client, "m", SessionLocal).reply(7, "Socio A", "hola")
     assert answer == loop.GAVE_UP
     assert len(client.messages.calls) == 10

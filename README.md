@@ -109,6 +109,7 @@ En el servicio de la app, **Variables**:
 | `ANTHROPIC_MODEL` | opcional, por defecto `claude-sonnet-5-5`. `claude-haiku-5-5` cuesta unas 20 veces menos; corra el eval antes de cambiarlo |
 | `ANTHROPIC_EFFORT` | opcional: `low`, `medium`, `high`, `xhigh` o `max`. Vacío es `medium` |
 | `ANTHROPIC_THINKING` | opcional: `adaptive` (por defecto) u `off` (solo con esfuerzo hasta `high`) |
+| `DEV_TELEGRAM_USERS` | opcional, usuarios de desarrollo: `David:820460532,Otro:123` (ver abajo) |
 | `MARKUP` | opcional, por defecto `0.25` |
 | `TIMEZONE` | opcional, por defecto `America/Caracas` (define qué es "hoy") |
 
@@ -144,6 +145,12 @@ DATABASE_URL="<DATABASE_PUBLIC_URL>" uv run python -m app.seed "Socio A:0.60:123
 - `https://<dominio>/healthz` debe responder `{"status":"ok"}`.
 - `https://api.telegram.org/bot<TOKEN>/getWebhookInfo` debe mostrar la URL del webhook y `pending_update_count` en 0.
 - Escríbale `/start` al bot desde la cuenta de un socio. Si escribe alguien que no es socio, el bot no contesta.
+
+### Usuarios de desarrollo
+
+`DEV_TELEGRAM_USERS="David:820460532,Otro:123"` (pares `nombre:id_de_telegram` separados por comas; vacío es ninguno) deja usar el bot a personas que no son socios: no tienen porcentaje, no entran en el reparto y no están en la tabla de socios, pero pueden hacer todo lo que hace un socio, incluidos `/start`, `/nuevo` y los botones Confirmar y Cancelar. Cada operación preparada solo la confirma quien la pidió. El nombre y el id no se pueden repetir, y un valor mal escrito impide que la app arranque. Si el id de un usuario de desarrollo es el de un socio activo, gana el socio.
+
+Para un usuario de desarrollo, "yo" no es ningún socio: si dice "pagué yo", el bot le pregunta a qué socio se refiere. Úselos en el ambiente de staging y no en producción, porque lo que registren entra en las cuentas reales.
 
 ## Usar el bot
 

@@ -121,6 +121,15 @@ Debe imprimir una línea por socio, con su porcentaje y su id.
 4. **El agente trabaja**: pregúntele "¿cuál es la tasa de hoy?" o "¿cuántos huevos quedan?".
 5. **Un extraño no entra**: desde una cuenta que no sea socio, mande `/start`. El bot no debe contestar nada.
 
+## Usuarios de desarrollo
+
+Para que una persona del equipo técnico pruebe el bot sin ser socio, ponga en Railway la variable `DEV_TELEGRAM_USERS` con pares `nombre:id_de_telegram` separados por comas, por ejemplo `David:820460532,Otro:123`, y vuelva a desplegar. El id se saca con @userinfobot, como en el paso 4.
+
+- Pueden hacer todo lo que hace un socio (registrar, consultar, preparar y confirmar cierres y anulaciones con los botones), pero no tienen porcentaje y no entran en el reparto.
+- "Yo" no es ningún socio para ellos: si dicen "pagué yo", el bot les pregunta qué socio fue.
+- Si el id coincide con el de un socio activo, se trata como ese socio.
+- Úselos en el ambiente de staging, no en producción: sus ventas de prueba entran en las cuentas reales.
+
 ## Si algo falla
 
 | Síntoma | Causa probable | Qué hacer |
@@ -132,6 +141,7 @@ Debe imprimir una línea por socio, con su porcentaje y su id.
 | `getWebhookInfo` contesta `Unauthorized` | El token está mal o fue revocado | Copie el token actual de BotFather |
 | El bot saluda pero no contesta los mensajes | No es un problema de Telegram | Los logs dirán `agent failed`; revise `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` |
 | Contesta "El asistente no está configurado todavía" | Falta `ANTHROPIC_API_KEY` | Póngala en Railway y despliegue |
+| Un usuario de desarrollo no contesta, o la app no arranca | `DEV_TELEGRAM_USERS` mal escrita (debe ser `nombre:id,nombre:id`, sin repetidos) | Revise los logs y corrija la variable |
 | A un socio no le contesta y al otro sí | Su id no está cargado o está mal | Revise su id con @userinfobot y repita el paso 5 con la lista completa |
 
 > Ojo con los logs: si Telegram rechaza el token al arrancar, el mensaje de error puede mostrar el token. Si se lo muestra a alguien, revóquelo con `/revoke`.

@@ -150,7 +150,7 @@ async def summary(session: AsyncSession, data: PeriodInput) -> PeriodSummary:
         date_from=data.date_from,
         date_to=data.date_to,
         sales_count=len(sales),
-        eggs_sold=sum(rules.eggs_in(s.cartons, s.halves, s.units) for s in sales),
+        eggs_sold=sum(rules.eggs_in(s.cartons, s.halves, s.units, s.boxes) for s in sales),
         sales_usd=sum((s.amount_usd for s in sales), ZERO),
         sales_bs=sum((s.amount_bs for s in sales), ZERO),
         sales_by_payment_method=by_method,

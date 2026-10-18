@@ -139,6 +139,7 @@ class Sale(CreatedAt, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     day: Mapped[date] = mapped_column(index=True)
     rate: Mapped[Decimal] = mapped_column(Rate)
+    boxes: Mapped[int] = mapped_column(server_default=text("0"))
     cartons: Mapped[int]
     halves: Mapped[int]
     units: Mapped[int]
@@ -156,7 +157,8 @@ class Sale(CreatedAt, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "cartons >= 0 AND halves >= 0 AND units >= 0 AND cartons + halves + units > 0",
+            "boxes >= 0 AND cartons >= 0 AND halves >= 0 AND units >= 0 "
+            "AND boxes + cartons + halves + units > 0",
             name="quantities",
         ),
     )

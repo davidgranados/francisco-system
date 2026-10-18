@@ -19,6 +19,7 @@ from app.services.purchases import VoidInput
 
 
 class SaleInput(BaseModel):
+    boxes: int = Field(default=0, ge=0, description="Cajas completas de 360 huevos")
     cartons: int = Field(default=0, ge=0, description="Cartones de 30 huevos")
     halves: int = Field(default=0, ge=0, description="Medios cartones de 15 huevos")
     units: int = Field(default=0, ge=0, description="Huevos sueltos")
@@ -41,7 +42,7 @@ class SaleInput(BaseModel):
 
     @model_validator(mode="after")
     def has_eggs_and_one_price(self) -> Self:
-        if rules.eggs_in(self.cartons, self.halves, self.units) == 0:
+        if rules.eggs_in(self.cartons, self.halves, self.units, self.boxes) == 0:
             raise ValueError("la venta debe tener al menos un huevo")
         if self.charged_usd is not None and self.charged_bs is not None:
             raise ValueError("indique el monto cobrado en $ o en Bs, no los dos")
@@ -58,6 +59,7 @@ class SaleView(BaseModel):
     id: int
     day: date
     rate: Decimal
+    boxes: int
     cartons: int
     halves: int
     units: int
@@ -84,10 +86,11 @@ def _view(sale: Sale) -> SaleView:
         id=sale.id,
         day=sale.day,
         rate=sale.rate,
+        boxes=sale.boxes,
         cartons=sale.cartons,
         halves=sale.halves,
         units=sale.units,
-        eggs=rules.eggs_in(sale.cartons, sale.halves, sale.units),
+        eggs=rules.eggs_in(sale.cartons, sale.halves, sale.units, sale.boxes),
         amount_usd=sale.amount_usd,
         amount_bs=sale.amount_bs,
         payment_method=sale.payment_method,
@@ -118,7 +121,7 @@ async def record_sale(session: AsyncSession, data: SaleInput) -> RegisteredSale:
     """Price the sale with the open box's prices and take its eggs oldest box first."""
     await lock_inventory(session)
     day = data.day or today()
-    eggs = rules.eggs_in(data.cartons, data.halves, data.units)
+    eggs = rules.eggs_in(data.cartons, data.halves, data.units, data.boxes)
     holdings = await boxes_with_eggs(session)
     rules.allocate_fifo(eggs, [(box.number, left) for box, left in holdings])
     rate = await rates.rate_for(session, day)
@@ -129,7 +132,7 @@ async def record_sale(session: AsyncSession, data: SaleInput) -> RegisteredSale:
         half=pricing_box.half_price,
         unit=pricing_box.unit_price,
     )
-    listed = rules.list_amount(prices, data.cartons, data.halves, data.units)
+    listed = rules.list_amount(prices, data.cartons, data.halves, data.units, data.boxes)
     if data.charged_bs is not None:
         amount_usd, amount_bs = rules.to_usd(data.charged_bs, rate.rate), data.charged_bs
     else:
@@ -138,6 +141,7 @@ async def record_sale(session: AsyncSession, data: SaleInput) -> RegisteredSale:
     sale = Sale(
         day=day,
         rate=rate.rate,
+        boxes=data.boxes,
         cartons=data.cartons,
         halves=data.halves,
         units=data.units,

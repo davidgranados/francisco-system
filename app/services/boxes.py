@@ -47,6 +47,7 @@ class BoxProfit(BaseModel):
 class SheetRow(BaseModel):
     day: date
     rate: Decimal | None
+    boxes: int
     cartons: int
     halves: int
     units: int
@@ -188,6 +189,7 @@ def _sheet_rows(movements: list[EggMovement]) -> list[SheetRow]:
             SheetRow(
                 day=day,
                 rate=sale_parts[0].sale.rate if sale_parts and sale_parts[0].sale else None,
+                boxes=sum(s.boxes for s in whole),
                 cartons=sum(s.cartons for s in whole),
                 halves=sum(s.halves for s in whole),
                 units=sum(s.units for s in whole),

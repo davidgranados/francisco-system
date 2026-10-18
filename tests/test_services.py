@@ -185,6 +185,20 @@ async def test_a_sale_needs_eggs(call: Call) -> None:
         await _sell(call, cartons=13)
 
 
+async def test_a_whole_box_sale_uses_the_box_price_and_empties_the_box(call: Call) -> None:
+    await _rate(call)
+    await _buy(call, "63.00")
+    sale = await _sell(call, boxes=1)
+    assert (sale.eggs, sale.amount_usd, sale.finished_boxes, sale.eggs_left) == (
+        360,
+        D("78.75"),
+        [1],
+        0,
+    )
+    sheet = await call(boxes.box_sheet, 1)
+    assert ([row.boxes for row in sheet.rows], sheet.total_eggs) == ([1], 360)
+
+
 async def test_part6_payment_in_bolivares_is_converted_at_the_day_rate(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")

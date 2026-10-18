@@ -108,6 +108,13 @@ def test_eggs_and_list_amount_of_mondays_sale() -> None:
     assert rules.list_amount(prices, 3, 0, 4) == D("19.59")
 
 
+def test_a_whole_box_is_charged_at_the_box_price() -> None:
+    prices = rules.prices_from_cost(D(63), MARKUP)
+    assert rules.eggs_in(0, 0, 0, boxes=1) == 360
+    assert rules.list_amount(prices, 0, 0, 0, boxes=1) == D("78.75")
+    assert rules.list_amount(prices, 12, 0, 0) == D("79.20")
+
+
 def test_fifo_takes_the_oldest_box_first() -> None:
     assert rules.allocate_fifo(31, [(1, 30), (2, 360)]) == [(1, 30), (2, 1)]
     assert rules.allocate_fifo(10, [(1, 0), (2, 360)]) == [(2, 10)]

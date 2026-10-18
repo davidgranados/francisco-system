@@ -49,12 +49,18 @@ def prices_from_cost(cost: Decimal, markup: Decimal) -> Prices:
     )
 
 
-def eggs_in(cartons: int, halves: int, units: int) -> int:
-    return cartons * Presentation.CARTON + halves * Presentation.HALF + units * Presentation.UNIT
+def eggs_in(cartons: int, halves: int, units: int, boxes: int = 0) -> int:
+    return (
+        boxes * Presentation.BOX
+        + cartons * Presentation.CARTON
+        + halves * Presentation.HALF
+        + units * Presentation.UNIT
+    )
 
 
-def list_amount(prices: Prices, cartons: int, halves: int, units: int) -> Decimal:
-    return cartons * prices.carton + halves * prices.half + units * prices.unit
+def list_amount(prices: Prices, cartons: int, halves: int, units: int, boxes: int = 0) -> Decimal:
+    """A whole box is charged at the box price, not as 12 cartons rounded up."""
+    return boxes * prices.box + cartons * prices.carton + halves * prices.half + units * prices.unit
 
 
 def to_bs(usd: Decimal, rate: Decimal) -> Decimal:

@@ -120,7 +120,7 @@ class Agent:
             history = await load_history(session, context.chat_id)
             rate = await _rate_text(session)
         turn: list[Message] = [
-            {"role": "user", "content": user_turn(text, today(), rate, context.speaker)}
+            {"role": "user", "content": user_turn(text, today(), rate, context.actor.introduction)}
         ]
         answer = await self._run(history, turn, context)
         async with self.session_factory() as session, session.begin():

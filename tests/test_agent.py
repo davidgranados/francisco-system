@@ -8,6 +8,7 @@ import pytest
 from anthropic.types import Message, TextBlock, ThinkingBlock, ToolUseBlock, Usage
 
 from app.agent import loop, pending, tools
+from app.agent.identity import Actor
 from app.agent.loop import Agent
 from app.agent.options import request_options
 from app.agent.tools import ToolContext
@@ -58,8 +59,10 @@ def final(text: str) -> Message:
 
 
 SOCIOS = {"que": "socios"}
-CHAT = ToolContext(chat_id=7, partner_id=1, speaker="Socio A")
-OTHER_PARTNER = ToolContext(chat_id=7, partner_id=2, speaker="Socio B")
+CHAT = ToolContext(chat_id=7, actor=Actor(111, "Socio A", partner_id=1))
+OTHER_PARTNER = ToolContext(chat_id=7, actor=Actor(222, "Socio B", partner_id=2))
+DEV = ToolContext(chat_id=7, actor=Actor(820460532, "David"))
+OTHER_DEV = ToolContext(chat_id=7, actor=Actor(123, "Otro"))
 NO_EGGS = {"cajas": 0, "cartones": 0, "medios": 0, "sueltos": 0}
 
 
@@ -261,3 +264,43 @@ async def test_the_agent_sends_the_options_and_handles_a_refusal() -> None:
     )
     assert answer.text == loop.REFUSED
     assert [m["role"] for m in await _history(7)] == ["user"]
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_developer_prepares_and_confirms_a_close_and_nobody_else_can(call: Call) -> None:
+    await call(
+        expenses.record_expense, expenses.ExpenseInput(concept="Bolsas", amount_usd=D("0.40"))
+    )
+    client = FakeAnthropic(
+        use("preparar_cierre", {"reserva": "0"}),
+        final("Toque Confirmar."),
+        final("Listo, cierre guardado."),
+    )
+    agent = Agent(client, "m", SessionLocal)
+    prepared = await agent.reply(DEV, "haz el cierre")
+    assert prepared.pending_id is not None
+    assert (
+        "Escribe: David (desarrollador, no es socio"
+        in client.messages.calls[0]["messages"][0]["content"]
+    )
+
+    for intruder in (CHAT, OTHER_PARTNER, OTHER_DEV):
+        refused = await agent.press(intruder, prepared.pending_id, confirm=True)
+        assert (refused.text, refused.closes_buttons) == (pending.NOT_YOURS, False)
+    assert await call(settlements.list_settlements) == []
+
+    done = await agent.press(DEV, prepared.pending_id, confirm=True)
+
+    assert (done.text, done.closes_buttons) == ("Listo, cierre guardado.", True)
+    assert len(await call(settlements.list_settlements)) == 1
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_partner_cannot_claim_what_a_developer_prepared_but_can_cancel_their_own(
+    call: Call,
+) -> None:
+    agent, _, action_id = await _prepare_close(call)
+    refused = await agent.press(DEV, action_id, confirm=False)
+    assert (refused.text, refused.closes_buttons) == (pending.NOT_YOURS, False)
+    cancelled = await agent.press(CHAT, action_id, confirm=False)
+    assert cancelled.text == tools.CANCELLED

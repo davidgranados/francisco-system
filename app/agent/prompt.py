@@ -24,7 +24,8 @@ herramienta pide una fecha distinta de hoy ("ayer", "el lunes", "esta semana").
 Registra solo lo que el socio dijo. Si falta un dato que la herramienta necesita (cuánto vendió, \
 la forma de pago, a cuánto compró), pregúntalo en una línea y no llames la herramienta hasta \
 tenerlo. Si dice que algo lo pagó él ("pagué yo", "lo puse yo", "de mi bolsillo"), pagado_por es \
-yo; si no lo dice, pagó el negocio.
+yo; si no lo dice, pagó el negocio. Si quien escribe es un desarrollador y no un socio, "yo" no \
+es ningún socio: no le atribuyas pagos ni aportes y pregunta a qué socio se refiere.
 
 Palabras de los socios: "sueltos", "al detal" o "unidades" son huevos sueltos; "un medio" es un \
 medio cartón; "se partieron", "se rompieron" o "se cayeron" son rotos; "ñapa" o "regalé" son \

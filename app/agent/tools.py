@@ -18,6 +18,7 @@ from pydantic_core import to_jsonable_python
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent import pending
+from app.agent.identity import Actor
 from app.config import today
 from app.domain import rules
 from app.domain.errors import DomainError
@@ -67,8 +68,7 @@ class ToolContext:
     """Who the model acts for: resolves "yo" and owns the actions waiting for a button."""
 
     chat_id: int
-    partner_id: int
-    speaker: str
+    actor: Actor
 
 
 Handler = Callable[[AsyncSession, Any, ToolContext], Awaitable[Any]]
@@ -95,7 +95,18 @@ def payment(value: FormaPago) -> PaymentMethod:
     return PaymentMethod(value)
 
 
-def payer(value: str, context: ToolContext) -> str | None:
+async def myself(session: AsyncSession, context: ToolContext) -> str:
+    """The partner name "yo" stands for; a developer is nobody's partner, so the model must ask."""
+    if context.actor.is_partner:
+        return context.actor.name
+    known = ", ".join(p.name for p in await partners.active_partners(session)) or "ninguno"
+    raise DomainError(
+        f"{context.actor.name} es desarrollador y no es socio, así que «yo» no corresponde a "
+        f"ningún socio. Pregunte a qué socio se refiere y use su nombre. Socios: {known}."
+    )
+
+
+async def payer(session: AsyncSession, value: str, context: ToolContext) -> str | None:
     """The partner who paid from their pocket, or None when the business paid."""
     name = value.strip()
     if name.lower() == NOT_SAID:
@@ -105,11 +116,11 @@ def payer(value: str, context: ToolContext) -> str | None:
         )
     if name.lower() == "negocio":
         return None
-    return context.speaker if name.lower() == "yo" else name
+    return await myself(session, context) if name.lower() == "yo" else name
 
 
-def partner_name(value: str, context: ToolContext) -> str:
-    return context.speaker if value.strip().lower() == "yo" else value.strip()
+async def partner_name(session: AsyncSession, value: str, context: ToolContext) -> str:
+    return await myself(session, context) if value.strip().lower() == "yo" else value.strip()
 
 
 def strict_schema(model: type[BaseModel]) -> dict[str, Any]:
@@ -201,7 +212,7 @@ async def _record_purchase(session: AsyncSession, p: CompraInput, ctx: ToolConte
             box_count=p.cajas,
             cost_per_box_usd=money(p.costo_por_caja_usd),
             payment_method=payment(p.forma_pago),
-            paid_by_partner=payer(p.pagado_por, ctx),
+            paid_by_partner=await payer(session, p.pagado_por, ctx),
             supplier=p.proveedor or None,
             day=p.fecha,
         ),
@@ -226,7 +237,7 @@ async def _record_expense(session: AsyncSession, p: GastoInput, ctx: ToolContext
             concept=p.concepto,
             amount_usd=amount if p.moneda == "usd" else None,
             amount_bs=amount if p.moneda == "bs" else None,
-            paid_by_partner=payer(p.pagado_por, ctx),
+            paid_by_partner=await payer(session, p.pagado_por, ctx),
             day=p.fecha,
         ),
     )
@@ -276,7 +287,7 @@ async def _record_contribution(session: AsyncSession, p: AporteInput, ctx: ToolC
     return await contributions.record_contribution(
         session,
         contributions.ContributionInput(
-            partner=partner_name(p.socio, ctx),
+            partner=await partner_name(session, p.socio, ctx),
             amount_usd=money(p.monto_usd),
             note=p.nota or None,
             day=p.fecha,
@@ -699,7 +710,7 @@ async def _dry_run(
         pending_id = await pending.create(
             session,
             chat_id=context.chat_id,
-            partner_id=context.partner_id,
+            telegram_user_id=context.actor.telegram_user_id,
             tool=tool.name,
             arguments=params.model_dump(mode="json"),
             preview=preview,
@@ -764,9 +775,11 @@ async def resolve_pending(
     *,
     confirm: bool,
 ) -> Resolution:
-    """Confirm or cancel a prepared action, once, for the partner who prepared it."""
+    """Confirm or cancel a prepared action, once, for the user who prepared it."""
     async with session_factory() as session, session.begin():
-        action = await pending.claim(session, action_id, context.chat_id, context.partner_id)
+        action = await pending.claim(
+            session, action_id, context.chat_id, context.actor.telegram_user_id
+        )
         if isinstance(action, pending.Refusal):
             return Resolution(action.message, final=action.final)
         if not confirm:

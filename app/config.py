@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from functools import cached_property
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from pydantic import field_validator, model_validator
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://francisco:francisco@localhost:5432/francisco"
     api_keys: str = ""
+    dev_telegram_users: str = ""
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
     public_url: str | None = None
@@ -69,6 +71,12 @@ class Settings(BaseSettings):
         parse_api_keys(value)
         return value
 
+    @field_validator("dev_telegram_users")
+    @classmethod
+    def dev_users_are_name_id_pairs(cls, value: str) -> str:
+        parse_dev_users(value)
+        return value
+
     @field_validator("timezone")
     @classmethod
     def timezone_exists(cls, value: str) -> str:
@@ -79,6 +87,10 @@ class Settings(BaseSettings):
     def api_key_map(self) -> dict[str, str]:
         """API key to the name of who holds it."""
         return parse_api_keys(self.api_keys)
+
+    @cached_property
+    def dev_users(self) -> tuple["DevUser", ...]:
+        return parse_dev_users(self.dev_telegram_users)
 
     @property
     def webhook_url(self) -> str | None:
@@ -96,6 +108,28 @@ def parse_api_keys(raw: str) -> dict[str, str]:
             raise ValueError("API_KEYS must look like 'name:key,name:key'")
         keys[key] = name
     return keys
+
+
+class DevUser(NamedTuple):
+    name: str
+    telegram_user_id: int
+
+
+def parse_dev_users(raw: str) -> tuple[DevUser, ...]:
+    """Read 'name:telegram_id,name:telegram_id'; names and ids must each be unique."""
+    expected = "DEV_TELEGRAM_USERS must look like 'name:telegram_id,name:telegram_id'"
+    users: list[DevUser] = []
+    for entry in filter(None, (part.strip() for part in raw.split(","))):
+        name, separator, number = entry.rpartition(":")
+        name = name.strip()
+        if not separator or not name or not number.strip().isdecimal() or int(number) == 0:
+            raise ValueError(f"{expected} (bad entry: {entry!r})")
+        users.append(DevUser(name, int(number)))
+    if len({user.name.lower() for user in users}) != len(users):
+        raise ValueError("DEV_TELEGRAM_USERS repeats a name")
+    if len({user.telegram_user_id for user in users}) != len(users):
+        raise ValueError("DEV_TELEGRAM_USERS repeats a Telegram id")
+    return tuple(users)
 
 
 settings = Settings()

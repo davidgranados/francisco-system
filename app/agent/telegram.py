@@ -2,7 +2,7 @@
 
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any, Protocol
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
@@ -19,11 +19,13 @@ from telegram.ext import (
     filters,
 )
 
+from app.agent import identity
+from app.agent.identity import Actor
 from app.agent.loop import Agent, AgentReply, clear_history
 from app.agent.tools import ToolContext
+from app.config import DevUser, settings
 from app.db import SessionLocal
-from app.models import Partner, ProcessedUpdate
-from app.services import partners
+from app.models import ProcessedUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -57,20 +59,26 @@ class ChatBot:
     """What the bot does with a message, independent of python-telegram-bot."""
 
     def __init__(
-        self, agent: Agent | None, session_factory: async_sessionmaker[AsyncSession]
+        self,
+        agent: Agent | None,
+        session_factory: async_sessionmaker[AsyncSession],
+        dev_users: Sequence[DevUser] | None = None,
     ) -> None:
         self.agent = agent
         self.session_factory = session_factory
+        self.dev_users = settings.dev_users if dev_users is None else dev_users
 
-    async def _partner(self, telegram_user_id: int) -> Partner | None:
+    async def _actor(self, telegram_user_id: int) -> Actor | None:
         async with self.session_factory() as session:
-            return await partners.by_telegram_id(session, telegram_user_id)
+            return await identity.resolve(session, telegram_user_id, self.dev_users)
 
     async def _context(self, user_id: int, chat_id: int) -> ToolContext | None:
-        partner = await self._partner(user_id)
-        if partner is None:
+        actor = await self._actor(user_id)
+        if actor is None:
             return None
-        return ToolContext(chat_id=chat_id, partner_id=partner.id, speaker=partner.name)
+        if not actor.is_partner:
+            logger.info("developer %s wrote in chat %s", actor.name, chat_id)
+        return ToolContext(chat_id=chat_id, actor=actor)
 
     async def _send(self, answer: AgentReply, reply: Reply) -> None:
         chunks = split_message(answer.text) or [NO_TEXT_REPLY]
@@ -107,12 +115,12 @@ class ChatBot:
         return answer.closes_buttons
 
     async def handle_start(self, user_id: int, reply: Reply) -> None:
-        partner = await self._partner(user_id)
-        if partner is not None:
-            await reply(GREETING.format(name=partner.name), None)
+        actor = await self._actor(user_id)
+        if actor is not None:
+            await reply(GREETING.format(name=actor.name), None)
 
     async def handle_new(self, user_id: int, chat_id: int, reply: Reply) -> None:
-        if await self._partner(user_id) is None:
+        if await self._actor(user_id) is None:
             return
         async with self.session_factory() as session, session.begin():
             await clear_history(session, chat_id)

@@ -7,6 +7,7 @@ import pytest
 from app.agent import telegram
 from app.agent.loop import AgentReply, load_history, save_messages
 from app.agent.tools import ToolContext
+from app.config import DevUser
 from app.db import SessionLocal
 from app.main import app
 
@@ -28,7 +29,7 @@ class FakeAgent:
         self.presses: list[tuple[ToolContext, int, bool]] = []
 
     async def reply(self, context: ToolContext, text: str) -> AgentReply:
-        self.calls.append((context.chat_id, context.speaker, text))
+        self.calls.append((context.chat_id, context.actor.name, text))
         return self.answer
 
     async def press(self, context: ToolContext, action_id: int, *, confirm: bool) -> AgentReply:
@@ -127,7 +128,7 @@ async def test_a_button_press_reaches_the_agent_as_the_partner_who_pressed() -> 
     assert not await bot.handle_button(222, 50, "borrar:9", recorder(replies))
 
     [(context, action_id, confirm)] = agent.presses
-    assert (context.chat_id, context.speaker, action_id, confirm) == (50, "Socio B", 9, False)
+    assert (context.chat_id, context.actor.name, action_id, confirm) == (50, "Socio B", 9, False)
     assert replies == [("Cancelado.", None)]
 
 
@@ -154,3 +155,59 @@ def test_split_message_prefers_line_breaks() -> None:
     text = "uno\n" + "x" * 10 + "\ndos"
     assert telegram.split_message(text, limit=12) == ["uno", "x" * 10, "dos"]
     assert telegram.split_message("") == []
+
+
+DAVID = DevUser("David", 820460532)
+OTRO = DevUser("Otro", 123)
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_developer_gets_the_greeting_and_the_agent_but_a_stranger_still_gets_nothing() -> (
+    None
+):
+    agent = FakeAgent("Quedan 360 huevos.")
+    replies: Sent = []
+    bot = telegram.ChatBot(agent, SessionLocal, dev_users=[DAVID])  # type: ignore[arg-type]
+
+    await bot.handle_start(DAVID.telegram_user_id, recorder(replies))
+    await bot.handle_text(DAVID.telegram_user_id, 60, "¿cuántos huevos quedan?", recorder(replies))
+    await bot.handle_new(DAVID.telegram_user_id, 60, recorder(replies))
+    await bot.handle_text(999, 999, "dame las cuentas", recorder(replies))
+    await bot.handle_start(999, recorder(replies))
+
+    assert agent.calls == [(60, "David", "¿cuántos huevos quedan?")]
+    assert [text for text, _ in replies] == [
+        telegram.GREETING.format(name="David"),
+        "Quedan 360 huevos.",
+        telegram.FORGOTTEN,
+    ]
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_developer_button_press_reaches_the_agent_as_that_developer() -> None:
+    agent = FakeAgent("")
+    bot = telegram.ChatBot(agent, SessionLocal, dev_users=[DAVID])  # type: ignore[arg-type]
+    assert await bot.handle_button(DAVID.telegram_user_id, 60, "ok:9", recorder([]))
+    [(context, action_id, confirm)] = agent.presses
+    assert (context.actor.name, context.actor.telegram_user_id, action_id, confirm) == (
+        "David",
+        DAVID.telegram_user_id,
+        9,
+        True,
+    )
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_developer_whose_id_is_a_partners_is_that_partner() -> None:
+    agent = FakeAgent("ok")
+    clash = DevUser("Impostor", 111)
+    bot = telegram.ChatBot(agent, SessionLocal, dev_users=[clash])  # type: ignore[arg-type]
+    await bot.handle_text(111, 50, "resumen", recorder([]))
+    assert agent.calls == [(50, "Socio A", "resumen")]
+
+
+async def test_the_bot_reads_the_developers_from_the_settings_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(telegram.settings, "dev_users", (DAVID, OTRO), raising=False)
+    assert telegram.ChatBot(None, SessionLocal).dev_users == (DAVID, OTRO)

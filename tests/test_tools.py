@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.agent import tools
+from app.agent.identity import Actor
 from app.agent.tools import ToolContext, dispatch, resolve_pending
 from app.config import today
 from app.db import SessionLocal
@@ -21,7 +22,8 @@ MAX_OPTIONAL_PARAMETERS = 24
 MAX_UNION_PARAMETERS = 16
 STRICT_SCALAR_KEYS = {"type", "description", "enum", "const", "default", "format", "pattern"}
 STRICT_FORMATS = {"date", "date-time", "time", "duration", "email", "hostname", "uri", "uuid"}
-SPEAKER = ToolContext(chat_id=7, partner_id=1, speaker="Socio A")
+SPEAKER = ToolContext(chat_id=7, actor=Actor(111, "Socio A", partner_id=1))
+DEV = ToolContext(chat_id=7, actor=Actor(820460532, "David"))
 
 
 def _schemas() -> list[tuple[str, dict[str, Any]]]:
@@ -174,3 +176,48 @@ async def test_a_preview_that_fails_creates_no_pending_action() -> None:
     outcome = await _run("preparar_anulacion", {"que": "compra", "id": 99, "motivo": "error"})
     assert (outcome.is_error, outcome.pending_id) == (True, None)
     assert "No existe la compra 99" in outcome.content
+
+
+@pytest.mark.usefixtures("two_partners", "stocked")
+async def test_yo_from_a_developer_asks_for_the_partner_and_writes_nothing(call: Call) -> None:
+    expense = {"concepto": "Transporte", "moneda": "usd", "monto": "1,50", "pagado_por": "yo"}
+    contribution = {"socio": "yo", "monto_usd": "10"}
+    for name, arguments in (("registrar_gasto", expense), ("registrar_aporte", contribution)):
+        outcome = await dispatch(name, arguments, SessionLocal, DEV)
+        assert outcome.is_error
+        assert "David es desarrollador" in outcome.content
+        assert "Socios: Socio A, Socio B." in outcome.content
+    assert await call(expenses.pending) == []
+
+
+@pytest.mark.usefixtures("two_partners", "stocked")
+async def test_a_developer_can_name_the_partner_who_paid(call: Call) -> None:
+    outcome = await dispatch(
+        "registrar_gasto",
+        {"concepto": "Bolsas", "moneda": "usd", "monto": "0.40", "pagado_por": "Socio B"},
+        SessionLocal,
+        DEV,
+    )
+    assert not outcome.is_error, outcome.content
+    [expense] = await call(expenses.pending)
+    assert expense.paid_by_partner == "Socio B"
+
+
+@pytest.mark.usefixtures("two_partners", "stocked")
+async def test_a_developer_can_prepare_and_confirm_a_void_and_a_partner_cannot(call: Call) -> None:
+    await dispatch("registrar_venta", {**SALE, "forma_pago": "punto"}, SessionLocal, DEV)
+    [sale] = await call(sales.list_sales)
+    prepared = await dispatch(
+        "preparar_anulacion",
+        {"que": "venta", "id": sale.id, "motivo": "error"},
+        SessionLocal,
+        DEV,
+    )
+    assert prepared.pending_id is not None
+
+    stolen = await resolve_pending(SessionLocal, prepared.pending_id, SPEAKER, confirm=True)
+    assert stolen.outcome is None
+    assert [s.voided for s in await call(sales.list_sales)] == [False]
+    done = await resolve_pending(SessionLocal, prepared.pending_id, DEV, confirm=True)
+    assert done.outcome == tools.pending.Outcome.CONFIRMED
+    assert [s.voided for s in await call(sales.list_sales)] == [True]

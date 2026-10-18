@@ -14,6 +14,9 @@ from app.config import settings
 from app.db import SessionLocal, engine
 from app.domain.errors import DomainError
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+# httpx logs request URLs at INFO, and Telegram URLs carry the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

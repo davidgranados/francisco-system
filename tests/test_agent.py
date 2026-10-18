@@ -9,6 +9,7 @@ from anthropic.types import Message, TextBlock, ThinkingBlock, ToolUseBlock, Usa
 
 from app.agent import loop, pending, tools
 from app.agent.loop import Agent
+from app.agent.options import request_options
 from app.agent.tools import ToolContext
 from app.config import today
 from app.db import SessionLocal
@@ -233,3 +234,30 @@ async def test_the_loop_stops_after_ten_rounds() -> None:
     assert answer.text == loop.GAVE_UP
     assert len(client.messages.calls) == 10
     assert (await _history(7))[-1]["content"] == [{"type": "text", "text": loop.GAVE_UP}]
+
+
+def test_every_request_names_its_thinking_and_effort() -> None:
+    assert request_options("claude-haiku-5-5") == {
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "medium"},
+    }
+    assert request_options("claude-sonnet-5-5", "low", "off")["thinking"] == {
+        "type": "between_tools"
+    }
+    assert request_options("claude-haiku-5-5", "high", "off")["thinking"] == {"type": "disabled"}
+    with pytest.raises(ValueError, match="thinking off"):
+        request_options("claude-haiku-5-5", "max", "off")
+
+
+async def test_the_agent_sends_the_options_and_handles_a_refusal() -> None:
+    refusal = _message([], "refusal")
+    client = FakeAnthropic(refusal)
+    agent = Agent(client, "claude-haiku-5-5", SessionLocal)
+    answer = await agent.reply(CHAT, "algo raro")
+    [sent] = client.messages.calls
+    assert (sent["thinking"], sent["output_config"]) == (
+        {"type": "adaptive"},
+        {"effort": "medium"},
+    )
+    assert answer.text == loop.REFUSED
+    assert [m["role"] for m in await _history(7)] == ["user"]

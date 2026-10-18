@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent import pending
+from app.agent.options import request_options
 from app.agent.prompt import SYSTEM_PROMPT, user_turn
 from app.agent.tools import ToolContext, dispatch, resolve_pending, tool_definitions
 from app.config import today
@@ -20,6 +21,7 @@ HISTORY_LIMIT = 30
 MAX_TOKENS = 16000
 GAVE_UP = "No pude terminar esa operación. Intente de nuevo, por partes."
 NO_TEXT = "No tengo una respuesta para eso."
+REFUSED = "No puedo ayudar con eso. Si es una cuenta del negocio, dígamela de otra forma."
 THINKING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
 CONFIRMED_NOTE = (
     "[Botón Confirmar] Se ejecutó {tool}. Resultado: {result}\n"
@@ -102,10 +104,12 @@ class Agent:
         client: AnthropicLike,
         model: str,
         session_factory: async_sessionmaker[AsyncSession],
+        options: dict[str, Any] | None = None,
     ) -> None:
         self.client = client
         self.model = model
         self.session_factory = session_factory
+        self.options = request_options(model) if options is None else options
         self.system = [
             {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
         ]
@@ -162,10 +166,13 @@ class Agent:
                 system=self.system,
                 tools=self.tools,
                 messages=[*history, *turn],
+                **self.options,
             )
             turn.append(
                 {"role": "assistant", "content": [block.to_dict() for block in response.content]}
             )
+            if response.stop_reason == "refusal":
+                return AgentReply(REFUSED, pending_id)
             if response.stop_reason != "tool_use":
                 return AgentReply(_text_of(response.content) or NO_TEXT, pending_id)
             results = []

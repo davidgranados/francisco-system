@@ -29,6 +29,7 @@ async def start_telegram() -> telegram.TelegramBridge | None:
             AsyncAnthropic(api_key=settings.anthropic_api_key),
             settings.anthropic_model,
             SessionLocal,
+            settings.model_request_options,
         )
         if settings.anthropic_api_key
         else None

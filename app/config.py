@@ -3,8 +3,10 @@ from decimal import Decimal
 from functools import cached_property
 from zoneinfo import ZoneInfo
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.agent.options import Effort, Thinking, request_options
 
 
 class Settings(BaseSettings):
@@ -18,6 +20,8 @@ class Settings(BaseSettings):
     railway_public_domain: str | None = None
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5-5"
+    anthropic_effort: Effort | None = None
+    anthropic_thinking: Thinking = "adaptive"
     markup: Decimal = Decimal("0.25")
     timezone: str = "America/Caracas"
     bcv_api_url: str = "https://ve.dolarapi.com/v1/dolares/oficial"
@@ -33,6 +37,20 @@ class Settings(BaseSettings):
     @classmethod
     def blank_is_unset(cls, value: str | None) -> str | None:
         return value or None
+
+    @field_validator("anthropic_effort", mode="before")
+    @classmethod
+    def blank_effort_is_default(cls, value: str | None) -> str | None:
+        return value or None
+
+    @model_validator(mode="after")
+    def thinking_fits_the_effort(self) -> "Settings":
+        request_options(self.anthropic_model, self.anthropic_effort, self.anthropic_thinking)
+        return self
+
+    @property
+    def model_request_options(self) -> dict[str, object]:
+        return request_options(self.anthropic_model, self.anthropic_effort, self.anthropic_thinking)
 
     @field_validator("database_url")
     @classmethod

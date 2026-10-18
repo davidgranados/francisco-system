@@ -1,3 +1,6 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from functools import cached_property
@@ -98,5 +101,18 @@ def parse_api_keys(raw: str) -> dict[str, str]:
 settings = Settings()
 
 
+_frozen_today: ContextVar[date | None] = ContextVar("frozen_today", default=None)
+
+
 def today() -> date:
-    return datetime.now(ZoneInfo(settings.timezone)).date()
+    return _frozen_today.get() or datetime.now(ZoneInfo(settings.timezone)).date()
+
+
+@contextmanager
+def frozen_today(day: date) -> Iterator[None]:
+    """Make today() return `day` in this context only; the evals replay fixed dates with it."""
+    token = _frozen_today.set(day)
+    try:
+        yield
+    finally:
+        _frozen_today.reset(token)

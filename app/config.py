@@ -66,10 +66,6 @@ class Settings(BaseSettings):
         )
         return f"{base.rstrip('/')}/telegram/webhook" if base else None
 
-    @property
-    def telegram_enabled(self) -> bool:
-        return bool(self.telegram_bot_token and self.telegram_webhook_secret)
-
 
 def parse_api_keys(raw: str) -> dict[str, str]:
     keys: dict[str, str] = {}

@@ -110,3 +110,16 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 ## Pruebas
 
 pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho y el bucle sin red.
+
+## Decisiones de implementación
+
+Puntos que el diseño dejaba abiertos y cómo quedaron en el código.
+
+- **Precio de una venta que cruza cajas.** Se cobra con los precios de la caja donde empieza (la abierta). El monto se reparte entre las cajas por huevos, con el resto del redondeo en la última. En la hoja de la caja, los Bs de esa venta se reparten en la misma proporción que los dólares.
+- **Anular una venta.** Se borran sus movimientos y cada caja vuelve al estado que dicen sus movimientos restantes. Por eso la máquina de estados también permite `finished → open`, `finished → stocked` y `open → stocked`. Se rechaza si alguna caja ya está `settled`, o si el resultado rompe el orden PEPS (dos cajas abiertas, o una caja vieja con huevos detrás de una más nueva ya empezada).
+- **Anular una compra.** Solo si todas sus cajas siguen `stocked`. Sus cajas se borran y las cajas posteriores se renumeran hacia abajo, para que "la caja siguiente" siga siendo número + 1.
+- **Conteo con más huevos de los anotados.** Se guarda el conteo con su diferencia positiva y un aviso, pero no se agregan huevos al inventario.
+- **Cierre vacío.** Si no hay cajas cerrables ni gastos pendientes, el cierre se rechaza.
+- **Historial del agente.** Se guardan los mensajes sin los bloques de *thinking*: la ventana de 30 mensajes recorta el principio del historial, y la API invalida un bloque de *thinking* cuando cambia lo que va antes de él. Dentro de una misma respuesta los bloques sí se devuelven tal cual.
+- **Telegram que no arranca.** Si Telegram rechaza el token o no responde al iniciar, se registra el error y la API sigue funcionando con el bot apagado.
+- **Campos de las herramientas.** Los esquemas salen de los mismos modelos de entrada de los servicios, con nombres de campo en inglés y descripciones en español. La confirmación se llama `confirmado` en el esquema, como dice el diseño.

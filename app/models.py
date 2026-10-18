@@ -277,13 +277,13 @@ class ProcessedUpdate(CreatedAt, Base):
 
 
 class PendingAction(CreatedAt, Base):
-    """A destructive tool call the model prepared; it runs only when its partner confirms."""
+    """A destructive tool call the model prepared; only the Telegram user who asked confirms it."""
 
     __tablename__ = "pending_actions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    partner_id: Mapped[int] = mapped_column(ForeignKey("partners.id"))
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger)
     tool: Mapped[str] = mapped_column(String(40))
     arguments: Mapped[Any] = mapped_column(JSONB)
     preview: Mapped[Any] = mapped_column(JSONB)

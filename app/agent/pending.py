@@ -30,7 +30,7 @@ async def create(
     session: AsyncSession,
     *,
     chat_id: int,
-    partner_id: int,
+    telegram_user_id: int,
     tool: str,
     arguments: dict[str, Any],
     preview: Any,
@@ -44,7 +44,7 @@ async def create(
     )
     action = PendingAction(
         chat_id=chat_id,
-        partner_id=partner_id,
+        telegram_user_id=telegram_user_id,
         tool=tool,
         arguments=arguments,
         preview=preview,
@@ -59,16 +59,16 @@ async def create(
 class Refusal:
     message: str
     final: bool = True
-    """False when the action is still usable by its own partner, so its buttons stay."""
+    """False when the action is still usable by whoever prepared it, so its buttons stay."""
 
 
-NOT_YOURS = "Solo el socio que pidió esta operación puede confirmarla o cancelarla."
+NOT_YOURS = "Solo quien pidió esta operación puede confirmarla o cancelarla."
 USED = "Esa operación ya se confirmó, se canceló o fue reemplazada por otra más nueva."
 EXPIRED = "Pasaron más de 15 minutos y esa vista previa venció. Pídala de nuevo."
 
 
 async def claim(
-    session: AsyncSession, action_id: int, chat_id: int, partner_id: int
+    session: AsyncSession, action_id: int, chat_id: int, telegram_user_id: int
 ) -> PendingAction | Refusal:
     """Lock the action and mark it used; a second press, or anyone else, gets a refusal."""
     action = await session.scalar(
@@ -76,7 +76,7 @@ async def claim(
     )
     if action is None or action.chat_id != chat_id:
         return Refusal(USED)
-    if action.partner_id != partner_id:
+    if action.telegram_user_id != telegram_user_id:
         return Refusal(NOT_YOURS, final=False)
     if action.resolved_at is not None:
         return Refusal(USED)

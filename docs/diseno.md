@@ -1,0 +1,112 @@
+# Diseño de Francisco System
+
+App a medida para el negocio de reventa de huevos descrito en `docs/cuaderno.md`. Una API REST (FastAPI + PostgreSQL) y, encima de ella, un agente conversacional en Telegram que maneja compras, ventas, inventario, gastos, tasa BCV, cierres y reparto en lenguaje natural. Se despliega en Railway como un solo servicio más una base Postgres de Railway.
+
+## Stack
+
+- Python 3.13, `uv` (pyproject + uv.lock + .python-version).
+- FastAPI 0.146, uvicorn, pydantic 2, pydantic-settings.
+- SQLAlchemy 2.1 async + asyncpg, Alembic (plantilla async). Dinero en `Numeric`, nunca float.
+- python-telegram-bot 22 en modo webhook dentro de la app FastAPI (`updater(None)`), con `secret_token`.
+- anthropic SDK, bucle manual de tool use sobre `messages.create`, modelo configurable (`claude-sonnet-5-5` por defecto), prompt caching en tools + system.
+- httpx para la tasa BCV (`https://ve.dolarapi.com/v1/dolares/oficial`, campo `promedio`).
+- Railway: Dockerfile (railway.toml está deprecado para servicios nuevos). Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Pre-deploy: `alembic upgrade head`. Healthcheck `/healthz`.
+
+## Usuarios y auth
+
+Muy pocos usuarios, que son los socios. La tabla `partners` guarda nombre, porcentaje del reparto y `telegram_user_id`.
+
+- Telegram: solo responden los `telegram_user_id` de socios activos. El resto recibe silencio.
+- API REST: cabecera `X-API-Key`. Las claves salen de la variable `API_KEYS="nombre:clave,nombre:clave"` y se comparan con `secrets.compare_digest`. No hay registro, login ni JWT.
+- El webhook de Telegram valida `X-Telegram-Bot-Api-Secret-Token`.
+
+## Modelo del dominio
+
+La unidad de todo es la **caja** (360 huevos). Una compra crea N cajas numeradas en orden global (Caja 1, Caja 2...). Se vende PEPS: siempre la caja abierta más vieja, una a la vez.
+
+### Unidades
+
+`Presentation` enum con huevos por presentación: `caja=360`, `carton=30`, `medio=15`, `unidad=1`. Todo el inventario se cuenta en huevos (enteros).
+
+### Estado de una caja
+
+Máquina de estados explícita en `Box.status`:
+
+```
+stocked ──(primera venta o rotura)──▶ open ──(huevos restantes = 0)──▶ finished
+finished ──(existe la caja siguiente)──▶ ganancia calculable
+finished ──(entra en un cierre)──▶ settled
+```
+
+- Solo puede haber una caja `open`. Al agotarse, la siguiente `stocked` pasa a `open` automáticamente cuando hace falta.
+- La ganancia de una caja solo existe cuando está `finished` y existe la caja siguiente (número + 1): `ganancia = ventas reales − costo de la caja siguiente`. Diferencia y costo final se derivan.
+- Huevos restantes = 360 − vendidos − rotos − merma, derivado de los movimientos.
+
+### Tablas
+
+- `partners`: nombre, share (Decimal, la suma de activos = 1), telegram_user_id, activo.
+- `exchange_rates`: fecha (única), tasa (Numeric 14,4), fuente (`bcv_api` | `manual`). Si la API falla se usa la última tasa guardada y se dice.
+- `purchases`: fecha, proveedor, cantidad de cajas, costo por caja USD, tasa, total USD, total Bs, forma de pago, quién pagó (negocio o socio), nota.
+- `boxes`: número (único, secuencial), purchase_id, costo USD, precios propios (caja, cartón, medio, unidad), status, fechas de apertura y agotamiento, settlement_id.
+- `sales`: fecha, tasa, cartones, medios, unidades, monto USD, monto Bs, forma de pago, cliente opcional, nota, anulada (bool + motivo). Una venta nunca se borra, se anula.
+- `egg_movements`: el libro del inventario. box_id, fecha, tipo (`sale` | `broken` | `shrinkage` | `gift`), huevos (>0), monto USD (solo ventas), sale_id o count_id. Una venta que cruza dos cajas genera un movimiento por caja; el monto se reparte por huevos y el resto del redondeo va al último movimiento.
+- `inventory_counts`: fecha, huevos esperados, huevos contados, diferencia. La diferencia negativa genera un movimiento `shrinkage` en la caja abierta.
+- `expenses`: fecha, concepto, monto USD, tasa, monto Bs, pagado por (negocio o socio_id), devuelto_en (fecha o null), settlement_id.
+- `contributions` (aportes): socio, fecha, monto USD, nota. Nunca se mezclan con la ganancia.
+- `settlements` (cierres): fecha, ganancia de cajas, gastos, reserva, ganancia neta, tasa, monto Bs, dinero para la próxima caja, nota. `settlement_shares`: socio, porcentaje, monto.
+- `conversation_messages`: chat_id, rol, contenido JSON, fecha. Historial del agente; se mandan los últimos 30.
+- `processed_updates`: update_id de Telegram, para no procesar dos veces un reintento.
+
+### Formas de pago
+
+`PaymentMethod` enum: `efectivo_usd`, `efectivo_bs`, `pago_movil`, `punto`.
+
+## Reglas resueltas (las ambigüedades del cuaderno)
+
+Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exacto. Todas las reglas viven en `app/domain/rules.py` y son configurables por variables de entorno donde se indica.
+
+1. **Precios** (amb. 1 y 2). Precio caja = costo × (1 + recargo), recargo 0,25 (`MARKUP`). Cartón y medio: precio caja ÷ 12 y ÷ 24, redondeado hacia arriba al múltiplo de $0,05. Unidad: ÷ 360, hacia arriba al centavo. Comprobado contra 75 → 6,25 / 3,15 / 0,21 y 78,75 → 6,60 / 3,30 / 0,22.
+2. **Qué precio se cobra** (amb. 10). Cada caja guarda sus precios, calculados de su propio costo al comprarla, que es lo que hace el ejemplo de la semana. Al comprar una caja más cara, el agente avisa y ofrece subir los precios de la caja abierta (herramienta `ajustar_precios`). Los precios también se pueden fijar a mano.
+3. **Bolívares** (amb. 3 y 4). Bs = USD × tasa, redondeado al centavo con medio hacia arriba. USD desde Bs = Bs ÷ tasa al centavo.
+4. **Rotos** (amb. 6). Se registran como movimiento `broken` de la caja abierta y no se cobran. La hoja de la caja muestra "huevos" = vendidos + rotos, y debe dar 360.
+5. **Reparto** (amb. 5). Cada parte se calcula al centavo con medio hacia arriba; si la suma no da exacto, el centavo de diferencia se ajusta en el socio de mayor porcentaje. 9,52 → 5,71 / 3,81.
+6. **Gastos del cierre** (amb. 11). Un cierre toma todos los gastos sin cierre con fecha hasta la del cierre, sin importar a qué caja se refieran.
+7. **Reserva** (amb. 12). Opcional, monto en USD que se pasa al cierre. Si se da en porcentaje, es sobre (ganancia de cajas − gastos).
+8. **Cierre sin cajas** (amb. 11). Se permite: ganancia de cajas 0, resta los gastos y la ganancia neta puede salir negativa. Una ganancia neta negativa no se reparte: el cierre queda registrado con partes en 0 y los gastos quedan cubiertos por el capital.
+9. **Devolución al socio** (Parte 7). Un gasto pagado por un socio queda pendiente de devolución. El cierre lo marca devuelto en su fecha.
+10. **Merma de conteo** (amb. 16). Se carga a la caja abierta (o a la más vieja con huevos) como `shrinkage`.
+11. **Costo promedio** (amb. 15). Se calcula sobre las cajas con huevos: valor de cada caja = costo × huevos restantes ÷ 360. Promedio por caja = valor total ÷ (huevos totales ÷ 360). Es solo informativo.
+12. **Costos unitarios** (amb. 17). Se guardan sin redondear y se muestran con 4 decimales.
+13. **Tasa del día**. Siempre la del día de la operación. Si no hay, se busca en la API y se guarda. Una operación con fecha pasada usa la tasa guardada de esa fecha o la última anterior.
+
+## Servicios
+
+`app/services/` guarda toda la lógica. FastAPI y el agente llaman a las mismas funciones. Cada función recibe la sesión de base de datos, valida y devuelve un modelo Pydantic. Los errores del negocio son `DomainError` con un mensaje en español para el usuario.
+
+- `rates`: obtener o crear la tasa de un día; fijarla a mano.
+- `purchases`: registrar compra (crea cajas con precios), anular compra si ninguna caja se tocó.
+- `sales`: registrar venta (cartones, medios, unidades, forma de pago, fecha opcional, monto cobrado opcional para descuentos), reparte en cajas PEPS, rechaza si no hay huevos. Anular venta.
+- `inventory`: registrar rotos o regalados, conteo físico, existencias (huevos, cajas, por caja), costo promedio.
+- `expenses`: registrar gasto, marcar devuelto, listar pendientes.
+- `pricing`: lista de precios del día en USD y Bs (Plantilla A), ajustar precios de una caja.
+- `boxes`: hoja de una caja (Plantilla C) y su ganancia (Plantilla G).
+- `settlements`: vista previa del cierre (Plantilla H) y ejecutar el cierre.
+- `contributions`: registrar aporte, listar.
+- `reports`: resumen de un período (ventas, compras, gastos, ganancia, por forma de pago) y dinero del negocio (entró − salió).
+
+## API REST
+
+`/api/v1/...` con un router por servicio. Todo con `X-API-Key` salvo `/healthz` y `/telegram/webhook`. Sirve de respaldo y para integraciones; la interfaz principal es Telegram.
+
+## Agente
+
+- Registro de herramientas en `app/agent/tools.py`: una tabla de `Tool(name, description, input_model, handler)`. El JSON schema sale del modelo Pydantic. Un solo despachador valida la entrada con Pydantic y llama al servicio. No hay if/else por herramienta.
+- Herramientas que escriben datos y no se pueden deshacer fácil (`ejecutar_cierre`, `anular_venta`, `anular_compra`) exigen `confirmado: true`. El system prompt le dice al modelo que primero muestre la vista previa y pida confirmación.
+- System prompt en español: explica el negocio, las unidades, la regla de la próxima caja, cómo hablar (corto, en español venezolano, montos en $ y Bs). La fecha y la tasa del día van en el mensaje del usuario, no en el system, para no romper el cache.
+- Bucle: hasta 10 rondas de tool use; cada resultado de herramienta vuelve como JSON. Un `DomainError` vuelve como `is_error`.
+- El historial se guarda por chat. Comando `/nuevo` lo borra. Comando `/start` saluda.
+- Las respuestas largas se parten en mensajes de 4096 caracteres.
+
+## Pruebas
+
+pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho y el bucle sin red.

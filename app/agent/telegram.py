@@ -8,18 +8,27 @@ from typing import Annotated, Any, Protocol
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from app.agent.loop import Agent, clear_history
+from app.agent.loop import Agent, AgentReply, clear_history
+from app.agent.tools import ToolContext
 from app.db import SessionLocal
-from app.models import ProcessedUpdate
+from app.models import Partner, ProcessedUpdate
 from app.services import partners
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_LIMIT = 4096
+NO_TEXT_REPLY = "Listo."
 FAILED = "Tuve un problema para responder. Intente de nuevo en un momento."
 NO_AGENT = "El asistente no está configurado todavía (falta ANTHROPIC_API_KEY)."
 GREETING = (
@@ -28,8 +37,10 @@ GREETING = (
     "Con /nuevo empiezo una conversación desde cero."
 )
 FORGOTTEN = "Listo, empecemos de nuevo."
+CONFIRM, CANCEL = "ok", "no"
 
-Reply = Callable[[str], Awaitable[Any]]
+Reply = Callable[[str, int | None], Awaitable[Any]]
+"""Send one message; the int, when given, is the pending action whose buttons go under it."""
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -51,37 +62,83 @@ class ChatBot:
         self.agent = agent
         self.session_factory = session_factory
 
-    async def _partner_name(self, telegram_user_id: int) -> str | None:
+    async def _partner(self, telegram_user_id: int) -> Partner | None:
         async with self.session_factory() as session:
-            partner = await partners.by_telegram_id(session, telegram_user_id)
-        return partner.name if partner else None
+            return await partners.by_telegram_id(session, telegram_user_id)
+
+    async def _context(self, user_id: int, chat_id: int) -> ToolContext | None:
+        partner = await self._partner(user_id)
+        if partner is None:
+            return None
+        return ToolContext(chat_id=chat_id, partner_id=partner.id, speaker=partner.name)
+
+    async def _send(self, answer: AgentReply, reply: Reply) -> None:
+        chunks = split_message(answer.text) or [NO_TEXT_REPLY]
+        for index, chunk in enumerate(chunks):
+            await reply(chunk, answer.pending_id if index == len(chunks) - 1 else None)
 
     async def handle_text(self, user_id: int, chat_id: int, text: str, reply: Reply) -> None:
-        name = await self._partner_name(user_id)
-        if name is None:
+        context = await self._context(user_id, chat_id)
+        if context is None:
             return
         if self.agent is None:
-            await reply(NO_AGENT)
+            await reply(NO_AGENT, None)
             return
         try:
-            answer = await self.agent.reply(chat_id, name, text)
+            answer = await self.agent.reply(context, text)
         except Exception:
             logger.exception("agent failed for chat %s", chat_id)
-            answer = FAILED
-        for chunk in split_message(answer):
-            await reply(chunk)
+            answer = AgentReply(FAILED)
+        await self._send(answer, reply)
+
+    async def handle_button(self, user_id: int, chat_id: int, data: str, reply: Reply) -> bool:
+        """Confirm or cancel a pending action. True when its buttons should be removed."""
+        context = await self._context(user_id, chat_id)
+        button = parse_button(data)
+        if context is None or button is None or self.agent is None:
+            return False
+        confirm, action_id = button
+        try:
+            answer = await self.agent.press(context, action_id, confirm=confirm)
+        except Exception:
+            logger.exception("button failed for chat %s", chat_id)
+            answer = AgentReply(FAILED)
+        await self._send(answer, reply)
+        return answer.closes_buttons
 
     async def handle_start(self, user_id: int, reply: Reply) -> None:
-        name = await self._partner_name(user_id)
-        if name is not None:
-            await reply(GREETING.format(name=name))
+        partner = await self._partner(user_id)
+        if partner is not None:
+            await reply(GREETING.format(name=partner.name), None)
 
     async def handle_new(self, user_id: int, chat_id: int, reply: Reply) -> None:
-        if await self._partner_name(user_id) is None:
+        if await self._partner(user_id) is None:
             return
         async with self.session_factory() as session, session.begin():
             await clear_history(session, chat_id)
-        await reply(FORGOTTEN)
+        await reply(FORGOTTEN, None)
+
+
+def button_data(confirm: bool, action_id: int) -> str:
+    return f"{CONFIRM if confirm else CANCEL}:{action_id}"
+
+
+def parse_button(data: str) -> tuple[bool, int] | None:
+    kind, _, number = data.partition(":")
+    if kind not in (CONFIRM, CANCEL) or not number.isdigit():
+        return None
+    return kind == CONFIRM, int(number)
+
+
+def confirmation_keyboard(action_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Confirmar", callback_data=button_data(True, action_id)),
+                InlineKeyboardButton("Cancelar", callback_data=button_data(False, action_id)),
+            ]
+        ]
+    )
 
 
 class TelegramBridge:
@@ -91,6 +148,7 @@ class TelegramBridge:
         self.application.add_handler(CommandHandler("start", self._on_start))
         self.application.add_handler(CommandHandler("nuevo", self._on_new))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
+        self.application.add_handler(CallbackQueryHandler(self._on_button))
         self.bot = bot
 
     async def start(self, webhook_url: str | None) -> None:
@@ -98,7 +156,9 @@ class TelegramBridge:
         await self.application.start()
         if webhook_url:
             await self.application.bot.set_webhook(
-                url=webhook_url, secret_token=self.secret, allowed_updates=["message"]
+                url=webhook_url,
+                secret_token=self.secret,
+                allowed_updates=["message", "callback_query"],
             )
         else:
             logger.warning("PUBLIC_URL is not set: the Telegram webhook was not registered")
@@ -114,23 +174,38 @@ class TelegramBridge:
         message, user = update.effective_message, update.effective_user
         if message is None or user is None or not message.text:
             return
-
-        async def reply(text: str) -> None:
-            await message.reply_text(text)
-
         await context.bot.send_chat_action(message.chat_id, ChatAction.TYPING)
-        await self.bot.handle_text(user.id, message.chat_id, message.text, reply)
+        await self.bot.handle_text(user.id, message.chat_id, message.text, _replier(message))
+
+    async def _on_button(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        query, user = update.callback_query, update.effective_user
+        if query is None or user is None or query.data is None:
+            return
+        await query.answer()
+        message = query.message
+        if not isinstance(message, Message):
+            return
+        if await self.bot.handle_button(user.id, message.chat_id, query.data, _replier(message)):
+            await query.edit_message_reply_markup(reply_markup=None)
 
     async def _on_start(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_message and update.effective_user:
             await self.bot.handle_start(
-                update.effective_user.id, update.effective_message.reply_text
+                update.effective_user.id, _replier(update.effective_message)
             )
 
     async def _on_new(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         message, user = update.effective_message, update.effective_user
         if message and user:
-            await self.bot.handle_new(user.id, message.chat_id, message.reply_text)
+            await self.bot.handle_new(user.id, message.chat_id, _replier(message))
+
+
+def _replier(message: Message) -> Reply:
+    async def reply(text: str, action_id: int | None) -> None:
+        markup = confirmation_keyboard(action_id) if action_id is not None else None
+        await message.reply_text(text, reply_markup=markup)
+
+    return reply
 
 
 class WebhookTarget(Protocol):

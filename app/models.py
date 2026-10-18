@@ -274,3 +274,19 @@ class ProcessedUpdate(CreatedAt, Base):
     __tablename__ = "processed_updates"
 
     update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+
+
+class PendingAction(CreatedAt, Base):
+    """A destructive tool call the model prepared; it runs only when its partner confirms."""
+
+    __tablename__ = "pending_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    partner_id: Mapped[int] = mapped_column(ForeignKey("partners.id"))
+    tool: Mapped[str] = mapped_column(String(40))
+    arguments: Mapped[Any] = mapped_column(JSONB)
+    preview: Mapped[Any] = mapped_column(JSONB)
+    expires_at: Mapped[datetime]
+    resolved_at: Mapped[datetime | None]
+    outcome: Mapped[str | None] = mapped_column(String(20))

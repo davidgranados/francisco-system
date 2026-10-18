@@ -1,12 +1,15 @@
 """The manual tool-use loop and the per-chat conversation history."""
 
+import json
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent import pending
 from app.agent.prompt import SYSTEM_PROMPT, user_turn
-from app.agent.tools import ToolContext, dispatch, tool_definitions
+from app.agent.tools import ToolContext, dispatch, resolve_pending, tool_definitions
 from app.config import today
 from app.domain.errors import DomainError
 from app.models import ConversationMessage
@@ -18,6 +21,11 @@ MAX_TOKENS = 16000
 GAVE_UP = "No pude terminar esa operación. Intente de nuevo, por partes."
 NO_TEXT = "No tengo una respuesta para eso."
 THINKING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+CONFIRMED_NOTE = (
+    "[Botón Confirmar] Se ejecutó {tool}. Resultado: {result}\n"
+    "Dile al socio en pocas líneas qué quedó guardado y sigue con lo que faltaba, si faltaba algo."
+)
+BUTTON_NOTE = "[Botón {button}] {tool}"
 
 Message = dict[str, Any]
 
@@ -29,6 +37,15 @@ class MessagesAPI(Protocol):
 class AnthropicLike(Protocol):
     @property
     def messages(self) -> MessagesAPI: ...
+
+
+@dataclass(frozen=True)
+class AgentReply:
+    text: str
+    pending_id: int | None = None
+    """The action waiting for Confirmar/Cancelar under this reply, if the model prepared one."""
+    closes_buttons: bool = False
+    """True when a pressed button's action is done with, so its buttons can go."""
 
 
 async def load_history(session: AsyncSession, chat_id: int) -> list[Message]:
@@ -94,17 +111,50 @@ class Agent:
         ]
         self.tools = tool_definitions()
 
-    async def reply(self, chat_id: int, speaker: str, text: str) -> str:
+    async def reply(self, context: ToolContext, text: str) -> AgentReply:
         async with self.session_factory() as session, session.begin():
-            history = await load_history(session, chat_id)
+            history = await load_history(session, context.chat_id)
             rate = await _rate_text(session)
-        turn: list[Message] = [{"role": "user", "content": user_turn(text, today(), rate, speaker)}]
-        answer = await self._run(history, turn, ToolContext(speaker=speaker))
+        turn: list[Message] = [
+            {"role": "user", "content": user_turn(text, today(), rate, context.speaker)}
+        ]
+        answer = await self._run(history, turn, context)
         async with self.session_factory() as session, session.begin():
-            await save_messages(session, chat_id, turn)
+            await save_messages(session, context.chat_id, turn)
         return answer
 
-    async def _run(self, history: list[Message], turn: list[Message], context: ToolContext) -> str:
+    async def press(self, context: ToolContext, action_id: int, *, confirm: bool) -> AgentReply:
+        """A Confirmar or Cancelar press: the code acts, then the model reports a success."""
+        resolution = await resolve_pending(
+            self.session_factory, action_id, context, confirm=confirm
+        )
+        if resolution.outcome == pending.Outcome.CONFIRMED:
+            result = json.dumps(resolution.result, ensure_ascii=False)
+            report = await self.reply(
+                context, CONFIRMED_NOTE.format(tool=resolution.tool, result=result)
+            )
+            return AgentReply(report.text, report.pending_id, closes_buttons=True)
+        if resolution.outcome is not None:
+            button = "Confirmar" if confirm else "Cancelar"
+            note = BUTTON_NOTE.format(button=button, tool=resolution.tool)
+            async with self.session_factory() as session, session.begin():
+                await save_messages(
+                    session,
+                    context.chat_id,
+                    [
+                        {"role": "user", "content": note},
+                        {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": resolution.message}],
+                        },
+                    ],
+                )
+        return AgentReply(resolution.message, closes_buttons=resolution.final)
+
+    async def _run(
+        self, history: list[Message], turn: list[Message], context: ToolContext
+    ) -> AgentReply:
+        pending_id: int | None = None
         for _ in range(MAX_ROUNDS):
             response = await self.client.messages.create(
                 model=self.model,
@@ -117,12 +167,13 @@ class Agent:
                 {"role": "assistant", "content": [block.to_dict() for block in response.content]}
             )
             if response.stop_reason != "tool_use":
-                return _text_of(response.content) or NO_TEXT
+                return AgentReply(_text_of(response.content) or NO_TEXT, pending_id)
             results = []
             for block in response.content:
                 if block.type != "tool_use":
                     continue
                 outcome = await dispatch(block.name, block.input, self.session_factory, context)
+                pending_id = outcome.pending_id or pending_id
                 results.append(
                     {
                         "type": "tool_result",
@@ -133,4 +184,4 @@ class Agent:
                 )
             turn.append({"role": "user", "content": results})
         turn.append({"role": "assistant", "content": [{"type": "text", "text": GAVE_UP}]})
-        return GAVE_UP
+        return AgentReply(GAVE_UP, pending_id)

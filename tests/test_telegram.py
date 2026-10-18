@@ -5,7 +5,8 @@ import httpx
 import pytest
 
 from app.agent import telegram
-from app.agent.loop import load_history, save_messages
+from app.agent.loop import AgentReply, load_history, save_messages
+from app.agent.tools import ToolContext
 from app.db import SessionLocal
 from app.main import app
 
@@ -21,13 +22,28 @@ class FakeBridge:
 
 
 class FakeAgent:
-    def __init__(self, answer: str) -> None:
-        self.answer = answer
+    def __init__(self, answer: str, pending_id: int | None = None) -> None:
+        self.answer = AgentReply(answer, pending_id)
         self.calls: list[tuple[int, str, str]] = []
+        self.presses: list[tuple[ToolContext, int, bool]] = []
 
-    async def reply(self, chat_id: int, speaker: str, text: str) -> str:
-        self.calls.append((chat_id, speaker, text))
+    async def reply(self, context: ToolContext, text: str) -> AgentReply:
+        self.calls.append((context.chat_id, context.speaker, text))
         return self.answer
+
+    async def press(self, context: ToolContext, action_id: int, *, confirm: bool) -> AgentReply:
+        self.presses.append((context, action_id, confirm))
+        return AgentReply("Cancelado.", closes_buttons=True)
+
+
+Sent = list[tuple[str, int | None]]
+
+
+def recorder(sent: Sent) -> telegram.Reply:
+    async def reply(text: str, action_id: int | None) -> None:
+        sent.append((text, action_id))
+
+    return reply
 
 
 @pytest.fixture
@@ -79,44 +95,59 @@ async def test_webhook_is_off_without_telegram(
 @pytest.mark.usefixtures("two_partners")
 async def test_strangers_get_silence() -> None:
     agent = FakeAgent("hola")
-    replies: list[str] = []
-
-    async def reply(text: str) -> None:
-        replies.append(text)
+    replies: Sent = []
+    reply = recorder(replies)
 
     bot = telegram.ChatBot(agent, SessionLocal)  # type: ignore[arg-type]
     await bot.handle_text(999, 999, "dame las cuentas", reply)
     await bot.handle_start(999, reply)
     await bot.handle_new(999, 999, reply)
-    assert (agent.calls, replies) == ([], [])
+    assert not await bot.handle_button(999, 999, "ok:1", reply)
+    assert (agent.calls, agent.presses, replies) == ([], [], [])
 
 
 @pytest.mark.usefixtures("two_partners")
 async def test_partners_get_the_answer_in_telegram_sized_chunks() -> None:
-    agent = FakeAgent("a" * 5000)
-    replies: list[str] = []
+    agent = FakeAgent("a" * 5000, pending_id=4)
+    replies: Sent = []
 
-    async def reply(text: str) -> None:
-        replies.append(text)
-
-    await telegram.ChatBot(agent, SessionLocal).handle_text(111, 50, "resumen", reply)  # type: ignore[arg-type]
+    bot = telegram.ChatBot(agent, SessionLocal)  # type: ignore[arg-type]
+    await bot.handle_text(111, 50, "resumen", recorder(replies))
     assert agent.calls == [(50, "Socio A", "resumen")]
-    assert [len(chunk) for chunk in replies] == [4096, 904]
+    assert [(len(text), action) for text, action in replies] == [(4096, None), (904, 4)]
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_button_press_reaches_the_agent_as_the_partner_who_pressed() -> None:
+    agent = FakeAgent("")
+    replies: Sent = []
+    bot = telegram.ChatBot(agent, SessionLocal)  # type: ignore[arg-type]
+
+    assert await bot.handle_button(222, 50, "no:9", recorder(replies))
+    assert not await bot.handle_button(222, 50, "borrar:9", recorder(replies))
+
+    [(context, action_id, confirm)] = agent.presses
+    assert (context.chat_id, context.speaker, action_id, confirm) == (50, "Socio B", 9, False)
+    assert replies == [("Cancelado.", None)]
+
+
+def test_button_data_round_trips_and_fits_telegram() -> None:
+    data = telegram.button_data(True, 123456789)
+    assert telegram.parse_button(data) == (True, 123456789)
+    assert len(data.encode()) <= 64
+    assert telegram.parse_button("ok:") is None
 
 
 @pytest.mark.usefixtures("two_partners")
 async def test_nuevo_forgets_the_chat() -> None:
     async with SessionLocal() as session, session.begin():
         await save_messages(session, 50, [{"role": "user", "content": "hola"}])
-    replies: list[str] = []
+    replies: Sent = []
 
-    async def reply(text: str) -> None:
-        replies.append(text)
-
-    await telegram.ChatBot(None, SessionLocal).handle_new(222, 50, reply)
+    await telegram.ChatBot(None, SessionLocal).handle_new(222, 50, recorder(replies))
     async with SessionLocal() as session:
         assert await load_history(session, 50) == []
-    assert replies == [telegram.FORGOTTEN]
+    assert replies == [(telegram.FORGOTTEN, None)]
 
 
 def test_split_message_prefers_line_breaks() -> None:

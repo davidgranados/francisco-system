@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from pydantic_core import to_jsonable_python
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent import pending
 from app.config import today
 from app.domain import rules
 from app.domain.errors import DomainError
@@ -57,12 +58,16 @@ NOT_SAID = "no_dijo"
 class ToolKind(StrEnum):
     READ = "read"
     WRITE = "write"
+    CONFIRM = "confirm"
+    """Runs only after the partner presses Confirmar; the model gets a dry-run preview."""
 
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Who the model is acting for; resolves "yo" without asking the model to copy names."""
+    """Who the model acts for: resolves "yo" and owns the actions waiting for a button."""
 
+    chat_id: int
+    partner_id: int
     speaker: str
 
 
@@ -343,9 +348,6 @@ class CierreInput(ToolInput):
         description="0 si no hay reserva; un monto en $ (ej. 5,00) o un porcentaje (ej. 10%)",
     )
     fecha: date = _day()
-    confirmado: bool = Field(
-        default=False, description="true solo después de que el socio confirmó"
-    )
 
     def settlement_input(self) -> settlements.SettlementInput:
         text = self.reserva.strip()
@@ -357,38 +359,22 @@ class CierreInput(ToolInput):
         return settlements.SettlementInput(day=self.fecha, reserve_usd=amount or None)
 
 
-async def _preview_settlement(session: AsyncSession, p: CierreInput, _: ToolContext) -> Any:
-    return await settlements.preview_settlement(session, p.settlement_input())
-
-
-async def _execute_settlement(session: AsyncSession, p: CierreInput, _: ToolContext) -> Any:
-    if not p.confirmado:
-        raise DomainError(CONFIRMATION_REQUIRED)
+async def _settle(session: AsyncSession, p: CierreInput, _: ToolContext) -> Any:
     return await settlements.execute_settlement(session, p.settlement_input())
 
 
 class AnulacionInput(ToolInput):
     que: Literal["venta", "compra"]
     id: int = Field(ge=1, description="El id de la venta o la compra, de consultar")
-    motivo: str = Field(min_length=1, description="Por qué se anula")
-    confirmado: bool = Field(
-        default=False, description="true solo después de que el socio confirmó"
-    )
+    motivo: str = Field(min_length=1, description="Por qué se anula, en pocas palabras")
 
 
 async def _void(session: AsyncSession, p: AnulacionInput, _: ToolContext) -> Any:
-    if not p.confirmado:
-        raise DomainError(CONFIRMATION_REQUIRED)
     reason = purchases.VoidInput(reason=p.motivo)
     if p.que == "venta":
         return await sales.void_sale(session, p.id, reason)
     return await purchases.void_purchase(session, p.id, reason)
 
-
-CONFIRMATION_REQUIRED = (
-    "Falta confirmación. Muestre al socio lo que se va a hacer, pregúntele si confirma y, "
-    "solo si dice que sí, vuelva a llamar con confirmado=true."
-)
 
 # --- Reads ----------------------------------------------------------------------------
 
@@ -593,29 +579,28 @@ TOOLS: list[Tool] = [
         ToolKind.WRITE,
     ),
     Tool(
-        "vista_previa_cierre",
-        "Calcula el cierre sin guardar nada: cajas cerradas, gastos, reserva, ganancia neta, "
-        "reparto por socio y devoluciones. Úsala antes de ejecutar_cierre y muestra el reparto.",
+        "preparar_cierre",
+        "Prepara el cierre y el reparto: cajas terminadas con su caja siguiente comprada, "
+        "gastos pendientes, reserva, ganancia neta, parte de cada socio y devoluciones. No "
+        "guarda nada: devuelve la vista previa y el bot le pone al mensaje los botones "
+        "Confirmar y Cancelar. Úsala cuando el socio pide el cierre, la repartición o 'cuánto "
+        "nos toca'. Muestra el reparto y dile que toque Confirmar; un 'sí' escrito no confirma.",
         CierreInput,
-        _preview_settlement,
-        ToolKind.READ,
-        ({"reserva": "0"}, {"reserva": "10%"}),
+        _settle,
+        ToolKind.CONFIRM,
+        ({"reserva": "0"}, {"reserva": "10%"}, {"reserva": "5,00"}),
     ),
     Tool(
-        "ejecutar_cierre",
-        "Guarda el cierre y el reparto. Antes muestra la vista previa y pide confirmación; solo "
-        "con un sí claro llama con confirmado=true.",
-        CierreInput,
-        _execute_settlement,
-        ToolKind.WRITE,
-    ),
-    Tool(
-        "anular",
-        "Anula una venta o una compra; las ventas devuelven sus huevos al inventario. Úsala "
-        "para corregir un registro equivocado. Antes muestra qué se anula y pide confirmación.",
+        "preparar_anulacion",
+        "Prepara la anulación de una venta o una compra registrada por error; la venta anulada "
+        "devuelve sus huevos al inventario. No anula nada todavía: el bot muestra los botones "
+        "Confirmar y Cancelar. Busca antes el id con consultar (ventas o compras). Para "
+        "corregir una cantidad, prepara la anulación y registra la venta correcta cuando el "
+        "socio confirme.",
         AnulacionInput,
         _void,
-        ToolKind.WRITE,
+        ToolKind.CONFIRM,
+        ({"que": "venta", "id": 12, "motivo": "eran 4 cartones, no 3"},),
     ),
     Tool(
         "consultar",
@@ -660,6 +645,13 @@ def tool_definitions() -> list[dict[str, Any]]:
 class ToolOutcome:
     content: str
     is_error: bool
+    pending_id: int | None = None
+
+
+PENDING_NOTICE = (
+    "No se guardó nada todavía. Muéstrale al socio lo que va a pasar; el bot pone los botones "
+    "Confirmar y Cancelar debajo de tu mensaje y solo con Confirmar se hace."
+)
 
 
 def _validation_message(error: ValidationError) -> str:
@@ -670,11 +662,50 @@ def _validation_message(error: ValidationError) -> str:
     return f"Datos inválidos: {problems}"
 
 
+def _json(value: Any) -> Any:
+    return to_jsonable_python(value)
+
+
+def _same_effect(preview: Any, result: Any) -> bool:
+    """A new settlement gets a new id on each run; everything else must match the preview."""
+    if isinstance(preview, dict) and isinstance(result, dict):
+        return {k: v for k, v in preview.items() if k != "id"} == {
+            k: v for k, v in result.items() if k != "id"
+        }
+    return bool(preview == result)
+
+
 def find_tool(name: str) -> Tool | None:
     """Exact name first, then one that differs only in letter case."""
     return REGISTRY.get(name) or next(
         (tool for tool in TOOLS if tool.name.lower() == name.lower()), None
     )
+
+
+async def _dry_run(
+    tool: Tool,
+    params: ToolInput,
+    session_factory: async_sessionmaker[AsyncSession],
+    context: ToolContext,
+) -> ToolOutcome:
+    """Run the action and roll it back, so the preview is exactly what Confirmar will do."""
+    async with session_factory() as session:
+        transaction = await session.begin()
+        try:
+            preview = _json(await tool.handler(session, params, context))
+        finally:
+            await transaction.rollback()
+    async with session_factory() as session, session.begin():
+        pending_id = await pending.create(
+            session,
+            chat_id=context.chat_id,
+            partner_id=context.partner_id,
+            tool=tool.name,
+            arguments=params.model_dump(mode="json"),
+            preview=preview,
+        )
+    content = {"vista_previa": preview, "aviso": PENDING_NOTICE}
+    return ToolOutcome(json.dumps(content, ensure_ascii=False), False, pending_id)
 
 
 async def dispatch(
@@ -690,6 +721,8 @@ async def dispatch(
         return ToolOutcome(f"No existe la herramienta {name}. Las que hay: {known}.", True)
     try:
         params = tool.input_model.model_validate(raw_input)
+        if tool.kind == ToolKind.CONFIRM:
+            return await _dry_run(tool, params, session_factory, context)
         async with session_factory() as session, session.begin():
             result = await tool.handler(session, params, context)
     except ValidationError as error:
@@ -699,4 +732,58 @@ async def dispatch(
     except Exception:
         logger.exception("tool %s failed", tool.name)
         return ToolOutcome("Error interno al ejecutar la herramienta.", is_error=True)
-    return ToolOutcome(json.dumps(to_jsonable_python(result), ensure_ascii=False), is_error=False)
+    return ToolOutcome(json.dumps(_json(result), ensure_ascii=False), is_error=False)
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What pressing a button did; `outcome` is None when the press was refused."""
+
+    message: str
+    outcome: pending.Outcome | None = None
+    tool: str | None = None
+    result: Any = None
+    final: bool = True
+
+
+CANCELLED = "Cancelado. No se guardó nada."
+CHANGED = (
+    "No lo hice: algo cambió desde la vista previa (una venta, un gasto o una caja nueva). "
+    "Pídalo de nuevo para ver los números actualizados."
+)
+
+
+class _Changed(Exception):
+    pass
+
+
+async def resolve_pending(
+    session_factory: async_sessionmaker[AsyncSession],
+    action_id: int,
+    context: ToolContext,
+    *,
+    confirm: bool,
+) -> Resolution:
+    """Confirm or cancel a prepared action, once, for the partner who prepared it."""
+    async with session_factory() as session, session.begin():
+        action = await pending.claim(session, action_id, context.chat_id, context.partner_id)
+        if isinstance(action, pending.Refusal):
+            return Resolution(action.message, final=action.final)
+        if not confirm:
+            action.outcome = pending.Outcome.CANCELLED
+            return Resolution(CANCELLED, action.outcome, action.tool)
+        tool = REGISTRY[action.tool]
+        try:
+            async with session.begin_nested():
+                params = tool.input_model.model_validate(action.arguments)
+                result = _json(await tool.handler(session, params, context))
+                if not _same_effect(action.preview, result):
+                    raise _Changed
+        except _Changed:
+            action.outcome = pending.Outcome.CHANGED
+            return Resolution(CHANGED, action.outcome, action.tool)
+        except DomainError as error:
+            action.outcome = pending.Outcome.FAILED
+            return Resolution(error.message, action.outcome, action.tool)
+        action.outcome = pending.Outcome.CONFIRMED
+        return Resolution("Hecho.", action.outcome, action.tool, result)

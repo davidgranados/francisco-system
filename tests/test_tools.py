@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from app.agent import tools
-from app.agent.tools import ToolContext, dispatch
+from app.agent.tools import ToolContext, dispatch, resolve_pending
 from app.config import today
 from app.db import SessionLocal
 from app.domain.types import PaymentMethod
@@ -21,7 +21,7 @@ MAX_OPTIONAL_PARAMETERS = 24
 MAX_UNION_PARAMETERS = 16
 STRICT_SCALAR_KEYS = {"type", "description", "enum", "const", "default", "format", "pattern"}
 STRICT_FORMATS = {"date", "date-time", "time", "duration", "email", "hostname", "uri", "uuid"}
-SPEAKER = ToolContext(speaker="Socio A")
+SPEAKER = ToolContext(chat_id=7, partner_id=1, speaker="Socio A")
 
 
 def _schemas() -> list[tuple[str, dict[str, Any]]]:
@@ -151,3 +151,26 @@ async def test_a_tool_name_in_the_wrong_case_still_runs() -> None:
     unknown = await _run("borrar_todo", {})
     assert unknown.is_error
     assert "registrar_venta" in unknown.content
+
+
+@pytest.mark.usefixtures("two_partners", "stocked")
+async def test_preparing_a_void_changes_nothing_until_confirmed(call: Call) -> None:
+    await _run("registrar_venta", {**SALE, "forma_pago": "punto"})
+    [sale] = await call(sales.list_sales)
+    arguments = {"que": "venta", "id": sale.id, "motivo": "eran 4 cartones"}
+
+    prepared = await _run("preparar_anulacion", arguments)
+
+    assert prepared.pending_id is not None
+    assert json.loads(prepared.content)["vista_previa"]["voided"] is True
+    assert [s.voided for s in await call(sales.list_sales)] == [False]
+    done = await resolve_pending(SessionLocal, prepared.pending_id, SPEAKER, confirm=True)
+    assert (done.outcome, done.result["id"]) == (tools.pending.Outcome.CONFIRMED, sale.id)
+    assert [s.voided for s in await call(sales.list_sales)] == [True]
+
+
+@pytest.mark.usefixtures("two_partners", "stocked")
+async def test_a_preview_that_fails_creates_no_pending_action() -> None:
+    outcome = await _run("preparar_anulacion", {"que": "compra", "id": 99, "motivo": "error"})
+    assert (outcome.is_error, outcome.pending_id) == (True, None)
+    assert "No existe la compra 99" in outcome.content

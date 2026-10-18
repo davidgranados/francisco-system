@@ -71,6 +71,8 @@ Lo que se investigó para preparar el bot para Haiku, con las fuentes, está en 
 
 La app es un solo servicio con su `Dockerfile` y una base PostgreSQL de Railway. No usa `railway.toml` (Railway lo dejó de aceptar para servicios nuevos); todo se configura en el panel.
 
+Hay dos entornos. `staging` se despliega solo con cada push a `main`. `production` se despliega únicamente al publicar un release en GitHub; publicar un release **es** desplegar. El flujo completo, los hotfix y la configuración están en `docs/despliegue.md`. Los pasos de abajo sirven para montar cualquiera de los dos entornos.
+
 ### 1. El bot en Telegram
 
 1. En Telegram, abra [@BotFather](https://t.me/BotFather) y mande `/newbot`.

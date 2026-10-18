@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: "Tag, branch or SHA to test; empty tests the commit that triggered the run"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: francisco
+          POSTGRES_PASSWORD: francisco
+          POSTGRES_DB: francisco
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U francisco -d francisco"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Lint
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+
+      - name: Migrations match the models
+        env:
+          DATABASE_URL: postgresql+asyncpg://francisco:francisco@localhost:5432/francisco
+        run: |
+          uv run --frozen alembic upgrade head
+          uv run --frozen alembic check
+
+      - name: Tests
+        run: uv run --frozen pytest -q

@@ -1,0 +1,41 @@
+name: Deploy to Railway production
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  ci:
+    if: github.event.release.target_commitish == 'main' || startsWith(github.event.release.target_commitish, 'hotfix/v')
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.release.tag_name }}
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Deploy the tag to production
+        run: railway up --ci --service ${{ vars.RAILWAY_SERVICE }} --environment production
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+
+  cleanup-on-failure:
+    needs: [ci, deploy]
+    if: always() && (needs.ci.result == 'failure' || needs.deploy.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete the release and its tag
+        run: gh release delete "${{ github.event.release.tag_name }}" --yes --cleanup-tag --repo "${{ github.repository }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

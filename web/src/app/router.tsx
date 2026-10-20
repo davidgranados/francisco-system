@@ -5,14 +5,11 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
-  redirect,
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
 import { z } from 'zod'
-import { isUnauthorized } from '@/api/client'
-import { queries } from '@/api/queries'
-import { signOut } from '@/app/session'
+import { requireSession, signOutIfUnauthorized } from '@/app/session'
 import { AppShell } from '@/components/AppShell'
 import { ErrorNotice } from '@/components/QueryState'
 import { buttonVariants } from '@/components/ui/button'
@@ -84,14 +81,7 @@ const loginRoute = createRoute({
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'app',
-  beforeLoad: async ({ context }) => {
-    try {
-      await context.queryClient.ensureQueryData(queries.me())
-    } catch (error) {
-      if (isUnauthorized(error)) throw redirect({ to: '/entrar' })
-      throw error
-    }
-  },
+  beforeLoad: ({ context }) => requireSession(context.queryClient),
   component: AppShell,
 })
 
@@ -217,11 +207,7 @@ export function createAppRouter(options: { history?: RouterHistory; queryConfig?
   const queryClient: QueryClient = new QueryClient({
     ...options.queryConfig,
     queryCache: new QueryCache({
-      onError: (error) => {
-        if (isUnauthorized(error)) {
-          void signOut(queryClient, router)
-        }
-      },
+      onError: (error) => signOutIfUnauthorized(error, queryClient, router),
     }),
     defaultOptions: { queries: { retry: false, staleTime: 30_000, refetchOnWindowFocus: false } },
   })

@@ -1,33 +1,15 @@
 import { useForm } from '@tanstack/react-form'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { z } from 'zod'
 import { auth } from '@/api/client'
 import { queries } from '@/api/queries'
+import { lastName, useSession } from '@/app/session'
 import { ErrorNotice, LoadingNotice, QueryState } from '@/components/QueryState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-
-const LAST_NAME_KEY = 'ledger.lastName'
-
-function readLastName(): string | null {
-  try {
-    return localStorage.getItem(LAST_NAME_KEY)
-  } catch {
-    return null
-  }
-}
-
-function rememberName(name: string) {
-  try {
-    localStorage.setItem(LAST_NAME_KEY, name)
-  } catch {
-    return
-  }
-}
 
 const codeSchema = z.object({
   code: z.string().regex(/^\d{6}$/, 'El código tiene 6 números. Escríbalos todos.'),
@@ -35,7 +17,7 @@ const codeSchema = z.object({
 
 function NamePicker({ onPick, pending }: { onPick: (name: string) => void; pending: boolean }) {
   const people = useQuery(queries.people())
-  const last = readLastName()
+  const last = lastName()
   return (
     <section aria-labelledby="who">
       <h1 id="who" className="mb-6 text-3xl font-extrabold">
@@ -86,15 +68,10 @@ function CodeStep({
   resending: boolean
   onBack: () => void
 }) {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const session = useSession()
   const login = useMutation({
     mutationFn: (code: string) => auth.login(name, code),
-    onSuccess: (me) => {
-      rememberName(name)
-      queryClient.setQueryData(queries.me().queryKey, me)
-      void navigate({ to: '/' })
-    },
+    onSuccess: (me) => session.signIn(me, name),
   })
 
   const form = useForm({

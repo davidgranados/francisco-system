@@ -26,6 +26,11 @@ async def pending(session: Session) -> list[ExpenseView]:
     return await expenses.pending(session)
 
 
+@router.get("/owed")
+async def owed(session: Session, paging: Paging) -> expenses.OwedExpenses:
+    return await expenses.owed_page(session, paging)
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def record_expense(session: Session, data: ExpenseInput) -> ExpenseView:
     return await expenses.record_expense(session, data)

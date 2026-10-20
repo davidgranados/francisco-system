@@ -51,6 +51,10 @@ class ExpenseView(BaseModel):
     settled: bool
 
 
+class OwedExpenses(Page[ExpenseView]):
+    owed_usd: Decimal = Field(description="Lo que se les debe a los socios en todas las páginas")
+
+
 def expense_view(expense: Expense) -> ExpenseView:
     return ExpenseView(
         id=expense.id,
@@ -206,3 +210,20 @@ async def pending(session: AsyncSession) -> list[ExpenseView]:
         .order_by(Expense.day, Expense.id)
     )
     return [expense_view(expense) for expense in rows]
+
+
+async def owed_page(session: AsyncSession, request: PageRequest) -> OwedExpenses:
+    """Partner-paid expenses not yet given back, oldest first, and what they add up to."""
+    owed = Expense.paid_by_partner_id.is_not(None) & Expense.reimbursed_on.is_(None)
+    query = select(Expense).where(owed).order_by(Expense.day, Expense.id)
+    rows, total = await fetch_page(session, query, request)
+    owed_usd = await session.scalar(
+        select(func.coalesce(func.sum(Expense.amount_usd), Decimal("0.00"))).where(owed)
+    )
+    return OwedExpenses(
+        items=[expense_view(expense) for expense in rows],
+        total=total,
+        page=request.page,
+        page_size=request.page_size,
+        owed_usd=owed_usd,
+    )

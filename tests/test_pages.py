@@ -5,8 +5,9 @@ from decimal import Decimal as D
 import httpx
 import pytest
 
+from app.domain.types import Fund, TransferKind
 from app.main import app
-from app.services import expenses, rates
+from app.services import expenses, rates, transfers
 from tests.conftest import Call
 
 KEY = {"X-API-Key": "clave-de-prueba"}
@@ -104,3 +105,42 @@ async def test_the_ledger_lists_page_what_was_recorded(client: httpx.AsyncClient
     assert (await page("/api/v1/sales?day=2026-10-11"))["total"] == 0
     assert [c["amount_usd"] for c in (await page("/api/v1/contributions"))["items"]] == ["10000.00"]
     assert (await page("/api/v1/settlements"))["items"] == []
+
+
+@pytest.mark.usefixtures("capital")
+async def test_owed_expenses_page_only_partner_paid_ones_and_total_every_page(
+    client: httpx.AsyncClient, call: Call
+) -> None:
+    await _rates(call, 4)
+    recorded = {}
+    for day, concept, payer in (
+        (1, "Bolsas", "Socio A"),
+        (2, "Gasolina", None),
+        (3, "Cartones", "Socio B"),
+        (4, "Hielo", "Socio A"),
+    ):
+        expense = await call(
+            expenses.record_expense,
+            expenses.ExpenseInput(
+                day=date(2026, 9, day), concept=concept, amount_usd=D(day), paid_by_partner=payer
+            ),
+        )
+        recorded[concept] = expense.id
+    await call(
+        transfers.move_money,
+        transfers.TransferInput(
+            kind=TransferKind.BETWEEN_FUNDS,
+            from_fund=Fund.CAPITAL,
+            to_fund=Fund.PETTY_CASH,
+            amount_usd=D("10.00"),
+            day=date(2026, 9, 1),
+        ),
+    )
+    await call(expenses.reimburse, [recorded["Hielo"]], date(2026, 9, 5))
+
+    response = await client.get("/api/v1/expenses/owed?page_size=1", headers=KEY)
+
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert ([e["concept"] for e in page["items"]], page["total"]) == (["Bolsas"], 2)
+    assert page["owed_usd"] == "4.00"

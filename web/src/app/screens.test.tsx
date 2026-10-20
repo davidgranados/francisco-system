@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { balances, me, mockApi, pageOf, renderApp, saleRow } from '@/test/utils'
 
@@ -175,5 +175,87 @@ describe('date range forms', () => {
     await screen.findByText('No hay movimiento en esas fechas.')
     expect(router.state.location.search).toMatchObject({ from: '2026-10-01', to: '2026-10-10' })
     expect(calls.at(-1)?.search.get('date_to')).toBe('2026-10-10')
+  })
+})
+
+describe('list filters', () => {
+  it('goes back to page 1 when a day is picked and drops the day with "Ver todos los días"', async () => {
+    const user = userEvent.setup()
+    const calls = mockApi({
+      'GET /api/auth/me': { body: me },
+      'GET /api/v1/sales': (call) => ({
+        body: pageOf([saleRow(1, { customer: `Página ${call.search.get('page')}` })], { total: 45, page: 3 }),
+      }),
+    })
+
+    const { router } = renderApp('/ventas?page=3')
+    await screen.findByText('Página 3')
+
+    fireEvent.change(screen.getByLabelText('Ver solo un día'), { target: { value: '2026-10-05' } })
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ page: 1, day: '2026-10-05' }))
+    await screen.findByText('Página 1')
+    expect(calls.at(-1)?.search.get('day')).toBe('2026-10-05')
+    expect(calls.at(-1)?.search.get('page')).toBe('1')
+
+    await user.click(screen.getByRole('button', { name: 'Ver todos los días' }))
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ page: 1 }))
+    await waitFor(() => expect(calls.at(-1)?.search.has('day')).toBe(false))
+    expect(calls.at(-1)?.search.get('page')).toBe('1')
+  })
+
+  it('goes back to page 1 when settled boxes are included', async () => {
+    const user = userEvent.setup()
+    const calls = mockApi({
+      'GET /api/auth/me': { body: me },
+      'GET /api/v1/boxes': () => ({ body: pageOf([], { total: 45, page: 2 }) }),
+    })
+
+    const { router } = renderApp('/cajas?page=2')
+    await screen.findByText('No hay cajas para mostrar.')
+    expect(calls.at(-1)?.search.has('include_settled')).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: /Mostrar también las cajas/ }))
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ page: 1, settled: true }))
+    await waitFor(() => expect(calls.at(-1)?.search.get('include_settled')).toBe('true'))
+    expect(calls.at(-1)?.search.get('page')).toBe('1')
+  })
+})
+
+describe('routes that default their data', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['/inventario/movimiento', '/api/v1/inventory/ledger', []],
+    ['/dinero/resumen', '/api/v1/reports/summary', {}],
+  ])('%s asks for the month so far when the URL names no dates', async (path, api, body) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 20, 12))
+    const calls = mockApi({
+      'GET /api/auth/me': { body: me },
+      [`GET ${api}`]: { body },
+    })
+
+    renderApp(path)
+
+    await waitFor(() => expect(calls.some((call) => call.path === api)).toBe(true))
+    const call = calls.find((item) => item.path === api)
+    expect(call?.search.get('date_from')).toBe('2026-10-01')
+    expect(call?.search.get('date_to')).toBe('2026-10-20')
+    expect(await screen.findByLabelText('Desde')).toHaveValue('2026-10-01')
+    expect(screen.getByLabelText('Hasta')).toHaveValue('2026-10-20')
+  })
+})
+
+describe('box sheet', () => {
+  it('asks the server for the sheet of the box named in the URL', async () => {
+    const calls = mockApi({ 'GET /api/auth/me': { body: me } })
+
+    renderApp('/cajas/7')
+
+    expect(await screen.findByRole('heading', { name: 'Hoja de la caja 7' })).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((call) => call.path === '/api/v1/boxes/7/sheet')).toBe(true))
   })
 })

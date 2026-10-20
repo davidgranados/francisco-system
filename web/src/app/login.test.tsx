@@ -91,6 +91,40 @@ describe('login', () => {
   })
 })
 
+describe('remembered name', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('offers the name that logged in first after logging out', async () => {
+    const user = userEvent.setup()
+    let loggedIn = false
+    const unauthorized = { status: 401, body: { detail: 'Entre otra vez.' } }
+    mockApi({
+      'GET /api/auth/me': () => (loggedIn ? { body: me } : unauthorized),
+      'GET /api/auth/people': { body: people },
+      'POST /api/auth/code': { status: 202, body: { expires_in_seconds: 600 } },
+      'POST /api/auth/login': () => {
+        loggedIn = true
+        return { body: me }
+      },
+      'POST /api/auth/logout': () => {
+        loggedIn = false
+        return { status: 204 }
+      },
+      'GET /api/v1/funds/balances': { body: balances },
+    })
+
+    renderApp('/entrar')
+    await user.click(await screen.findByRole('button', { name: 'Maria' }))
+    await user.type(await screen.findByLabelText('Código de 6 números'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Entrar' }))
+    await user.click(await screen.findByRole('button', { name: 'Salir' }))
+
+    const buttons = await screen.findAllByRole('button')
+    expect(buttons[0]).toHaveTextContent('Maria')
+    expect(screen.getByText('Entró la última vez')).toBeInTheDocument()
+  })
+})
+
 describe('logout', () => {
   it('lands on the list of names, ready to log in again', async () => {
     const user = userEvent.setup()

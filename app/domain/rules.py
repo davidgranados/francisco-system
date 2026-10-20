@@ -179,14 +179,13 @@ def average_box_cost(holdings: Sequence[tuple[Decimal, int]]) -> Decimal | None:
     return value / (Decimal(eggs) / EGGS_PER_BOX)
 
 
-def reserve_amount(
-    base: Decimal, reserve_usd: Decimal | None, reserve_pct: Decimal | None
-) -> Decimal:
-    if reserve_usd is not None:
-        return reserve_usd
-    if reserve_pct is None or base <= 0:
+def set_aside(base: Decimal, usd: Decimal | None, fraction: Decimal | None) -> Decimal:
+    """What a cierre keeps back (reserve or reinvestment): a fixed amount or a share of `base`."""
+    if usd is not None:
+        return usd
+    if fraction is None or base <= 0:
         return Decimal("0.00")
-    return round_cents(base * reserve_pct)
+    return round_cents(base * fraction)
 
 
 def format_number(amount: Decimal, places: int = 2) -> str:

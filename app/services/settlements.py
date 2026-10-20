@@ -14,7 +14,7 @@ from app.domain import rules
 from app.domain.errors import DomainError
 from app.domain.types import BoxStatus
 from app.models import Box, EggMovement, Expense, Partner, Settlement, SettlementShare
-from app.services import partners, rates
+from app.services import funds, partners, rates
 from app.services.boxes import BoxProfit, profit_of
 from app.services.expenses import ExpenseView, expense_view, unsettled_until
 
@@ -28,12 +28,21 @@ class SettlementInput(BaseModel):
         le=1,
         description="Reserva como fracción de (ganancia de cajas - gastos), ej. 0.10",
     )
+    reinvest_usd: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    reinvest_percent: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Reinversión al capital como fracción de (ganancia de cajas - gastos)",
+    )
     note: str | None = None
 
     @model_validator(mode="after")
-    def one_reserve(self) -> Self:
+    def one_amount_each(self) -> Self:
         if self.reserve_usd is not None and self.reserve_percent is not None:
             raise ValueError("indique la reserva en $ o en porcentaje, no las dos")
+        if self.reinvest_usd is not None and self.reinvest_percent is not None:
+            raise ValueError("indique la reinversión en $ o en porcentaje, no las dos")
         return self
 
 
@@ -49,7 +58,7 @@ class Reimbursement(BaseModel):
 
 
 class SettlementPreview(BaseModel):
-    """Plantilla H, plus the money check of Part 9 step 7."""
+    """Plantilla H, plus the money check of Part 9 step 7 and where the money goes."""
 
     day: date
     boxes: list[BoxProfit]
@@ -57,15 +66,19 @@ class SettlementPreview(BaseModel):
     box_profit_usd: Decimal
     expenses: list[ExpenseView]
     expenses_usd: Decimal
-    reserve_usd: Decimal
-    net_profit_usd: Decimal
+    reserve_usd: Decimal = Field(description="Va a la caja de ahorros")
+    reinvest_usd: Decimal = Field(description="Vuelve al capital")
+    net_profit_usd: Decimal = Field(description="Utilidades: se reparten y salen del negocio")
     shares: list[ShareView]
     shares_total_usd: Decimal
     rate: Decimal
     rate_stale: bool
     amount_bs: Decimal
-    next_box_money_usd: Decimal
+    next_box_money_usd: Decimal = Field(description="Capital devuelto: el costo de reponer")
     reimbursements: list[Reimbursement]
+    petty_cash_after_usd: Decimal = Field(description="Caja chica al final del día del cierre")
+    capital_after_usd: Decimal = Field(description="Capital al final del día del cierre")
+    savings_after_usd: Decimal = Field(description="Caja de ahorros al final del día del cierre")
     note: str | None
 
 
@@ -129,10 +142,16 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
     profits = [profit for _, profit in closable]
     box_profit = sum((p.profit_usd for p in profits), Decimal("0.00"))
     expenses_usd = sum((e.amount_usd for e in expenses), Decimal("0.00"))
-    reserve = rules.reserve_amount(
-        box_profit - expenses_usd, data.reserve_usd, data.reserve_percent
-    )
-    net = box_profit - expenses_usd - reserve
+    base = box_profit - expenses_usd
+    reserve = rules.set_aside(base, data.reserve_usd, data.reserve_percent)
+    reinvest = rules.set_aside(base, data.reinvest_usd, data.reinvest_percent)
+    if reserve + reinvest > max(base, Decimal("0.00")):
+        raise DomainError(
+            f"La reserva ({rules.format_usd(reserve)}) y la reinversión "
+            f"({rules.format_usd(reinvest)}) pasan de la ganancia de las cajas menos los gastos "
+            f"({rules.format_usd(base)}). Bájelas."
+        )
+    net = base - reserve - reinvest
     distributed = max(net, Decimal("0.00"))
     amounts = rules.split_shares(distributed, [p.share for p in members])
     rate = await rates.rate_for(session, day)
@@ -141,6 +160,9 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         if expense.paid_by_partner and expense.reimbursed_on is None:
             name = expense.paid_by_partner.name
             reimbursements[name] = reimbursements.get(name, Decimal(0)) + expense.amount_usd
+    next_box_money = sum((p.next_box_cost_usd for p in profits), Decimal("0.00"))
+    before = await funds.balances(session, until=day)
+    to_capital = next_box_money + reinvest
     preview = SettlementPreview(
         day=day,
         boxes=profits,
@@ -149,6 +171,7 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         expenses=[expense_view(e) for e in expenses],
         expenses_usd=expenses_usd,
         reserve_usd=reserve,
+        reinvest_usd=reinvest,
         net_profit_usd=net,
         shares=[
             ShareView(partner=p.name, share=p.share, amount_usd=amount)
@@ -158,8 +181,15 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         rate=rate.rate,
         rate_stale=rate.stale,
         amount_bs=rules.to_bs(distributed, rate.rate),
-        next_box_money_usd=sum((p.next_box_cost_usd for p in profits), Decimal("0.00")),
+        next_box_money_usd=next_box_money,
         reimbursements=[Reimbursement(partner=k, amount_usd=v) for k, v in reimbursements.items()],
+        petty_cash_after_usd=before.petty_cash_usd
+        - to_capital
+        - reserve
+        - sum(amounts, Decimal("0.00"))
+        - sum(reimbursements.values(), Decimal("0.00")),
+        capital_after_usd=before.capital_usd + to_capital,
+        savings_after_usd=before.savings_usd + reserve,
         note=data.note,
     )
     return _Plan(
@@ -180,6 +210,7 @@ async def execute_settlement(session: AsyncSession, data: SettlementInput) -> Se
         box_profit_usd=preview.box_profit_usd,
         expenses_usd=preview.expenses_usd,
         reserve_usd=preview.reserve_usd,
+        reinvest_usd=preview.reinvest_usd,
         net_profit_usd=preview.net_profit_usd,
         rate=preview.rate,
         amount_bs=preview.amount_bs,
@@ -241,6 +272,7 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
             select(Expense).where(Expense.settlement_id == settlement.id).order_by(Expense.day)
         )
     )
+    after = await funds.balances(session, until=settlement.day)
     return SettlementView(
         id=settlement.id,
         day=settlement.day,
@@ -250,6 +282,7 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
         expenses=[expense_view(e) for e in expenses],
         expenses_usd=settlement.expenses_usd,
         reserve_usd=settlement.reserve_usd,
+        reinvest_usd=settlement.reinvest_usd,
         net_profit_usd=settlement.net_profit_usd,
         shares=[
             ShareView(partner=s.partner.name, share=s.share, amount_usd=s.amount_usd)
@@ -265,5 +298,8 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
             for e in expenses
             if e.paid_by_partner
         ],
+        petty_cash_after_usd=after.petty_cash_usd,
+        capital_after_usd=after.capital_usd,
+        savings_after_usd=after.savings_usd,
         note=settlement.note,
     )

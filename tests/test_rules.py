@@ -143,9 +143,9 @@ def test_box_state_machine() -> None:
 
 
 def test_reserve() -> None:
-    assert rules.reserve_amount(D("9.52"), None, D("0.10")) == D("0.95")
-    assert rules.reserve_amount(D("9.52"), D("2.00"), None) == D("2.00")
-    assert rules.reserve_amount(D("-1.90"), None, D("0.10")) == D("0.00")
+    assert rules.set_aside(D("9.52"), None, D("0.10")) == D("0.95")
+    assert rules.set_aside(D("9.52"), D("2.00"), None) == D("2.00")
+    assert rules.set_aside(D("-1.90"), None, D("0.10")) == D("0.00")
 
 
 def test_spanish_number_format() -> None:

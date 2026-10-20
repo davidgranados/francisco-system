@@ -90,3 +90,32 @@ describe('login', () => {
     expect(await screen.findByRole('heading', { name: '¿Quién es usted?' })).toBeInTheDocument()
   })
 })
+
+describe('logout', () => {
+  it('lands on the list of names, ready to log in again', async () => {
+    const user = userEvent.setup()
+    let loggedIn = true
+    const unauthorized = { status: 401, body: { detail: 'Su sesión no es válida o ya venció. Entre de nuevo.' } }
+    mockApi({
+      'GET /api/auth/me': async () => {
+        if (loggedIn) return { body: me }
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return unauthorized
+      },
+      'GET /api/v1/funds/balances': () => (loggedIn ? { body: balances } : unauthorized),
+      'POST /api/auth/logout': () => {
+        loggedIn = false
+        return { status: 204 }
+      },
+      'GET /api/auth/people': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return { body: [{ name: 'Francisco' }, { name: 'Rosa' }] }
+      },
+    })
+
+    renderApp('/')
+    await user.click(await screen.findByRole('button', { name: 'Salir' }))
+
+    expect(await screen.findByRole('button', { name: 'Rosa' })).toBeInTheDocument()
+  })
+})

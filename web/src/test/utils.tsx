@@ -15,7 +15,7 @@ export interface MockResponse {
   body?: unknown
 }
 
-type Handler = MockResponse | ((call: MockCall) => MockResponse)
+type Handler = MockResponse | ((call: MockCall) => MockResponse | Promise<MockResponse>)
 
 export function mockApi(handlers: Record<string, Handler>) {
   const calls: MockCall[] = []
@@ -33,7 +33,7 @@ export function mockApi(handlers: Record<string, Handler>) {
       calls.push(call)
       const handler = handlers[`${method} ${url.pathname}`]
       if (!handler) return new Response(JSON.stringify({ detail: 'No existe.' }), { status: 404 })
-      const result = typeof handler === 'function' ? handler(call) : handler
+      const result = await (typeof handler === 'function' ? handler(call) : handler)
       const status = result.status ?? 200
       return new Response(status === 204 ? null : JSON.stringify(result.body ?? {}), {
         status,

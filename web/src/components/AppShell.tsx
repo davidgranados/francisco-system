@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
+import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 import { api } from '@/api/client'
 import { queries } from '@/api/queries'
+import { signOut } from '@/app/session'
 import { Button, buttonVariants } from '@/components/ui/button'
 
 export function AppShell() {
   const me = useQuery(queries.me())
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const router = useRouter()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const main = useRef<HTMLElement>(null)
 
@@ -19,10 +20,7 @@ export function AppShell() {
 
   const logout = useMutation({
     mutationFn: api.logout,
-    onSettled: () => {
-      queryClient.clear()
-      void navigate({ to: '/entrar' })
-    },
+    onSettled: () => signOut(queryClient, router),
   })
 
   return (

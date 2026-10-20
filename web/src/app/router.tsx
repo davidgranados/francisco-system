@@ -15,6 +15,7 @@ import type { ComponentType } from 'react'
 import { z } from 'zod'
 import { isUnauthorized } from '@/api/client'
 import { queries } from '@/api/queries'
+import { signOut } from '@/app/session'
 import { AppShell } from '@/components/AppShell'
 import { ErrorNotice } from '@/components/QueryState'
 import { buttonVariants } from '@/components/ui/button'
@@ -248,8 +249,7 @@ export function createAppRouter(options: { history?: RouterHistory; queryConfig?
     queryCache: new QueryCache({
       onError: (error) => {
         if (isUnauthorized(error)) {
-          queryClient.clear()
-          void router.navigate({ to: '/entrar' })
+          void signOut(queryClient, router)
         }
       },
     }),

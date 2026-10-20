@@ -87,7 +87,6 @@ async def cash_flow(
         session,
         Purchase.total_usd,
         ~Purchase.voided,
-        Purchase.paid_by_partner_id.is_(None),
         *_between(Purchase.day, date_from, date_to),
     )
     expenses = await _sum(

@@ -216,12 +216,12 @@
     - socio: a 63, en efectivo, con la plata del negocio
       llamadas:
         - herramienta: registrar_compra
-          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: efectivo_usd, pagado_por: negocio}
+          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: efectivo_usd}
       prohibidas: [ajustar_precios]
       menciona: ["precio"]
   estado:
     huevos: 453
-    compras_nuevas: [{cajas: 1, costo_por_caja_usd: "63.00", pagado_por: negocio}]
+    compras_nuevas: [{cajas: 1, costo_por_caja_usd: "63.00"}]
 
 - id: gasto_sin_monto
   categoria: falta_info
@@ -246,10 +246,10 @@
     - socio: compré 2 cajas a 60 cada una en efectivo
       llamadas:
         - herramienta: registrar_compra
-          args: {cajas: 2, costo_por_caja_usd: "60", forma_pago: efectivo_usd, pagado_por: negocio}
+          args: {cajas: 2, costo_por_caja_usd: "60", forma_pago: efectivo_usd}
   estado:
     huevos: 1080
-    compras_nuevas: [{cajas: 2, costo_por_caja_usd: "60.00", total_usd: "120.00", pagado_por: negocio}]
+    compras_nuevas: [{cajas: 2, costo_por_caja_usd: "60.00", total_usd: "120.00"}]
 
 - id: compra_mas_cara_y_subir_precios
   categoria: compras
@@ -259,7 +259,7 @@
     - socio: Compré una caja a 63 en efectivo, la pagó el negocio
       llamadas:
         - herramienta: registrar_compra
-          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: efectivo_usd, pagado_por: negocio}
+          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: efectivo_usd}
       prohibidas: [ajustar_precios]
       menciona: ["precio"]
     - socio: dale, súbele los precios
@@ -275,15 +275,19 @@
 - id: compra_pagada_por_un_socio
   categoria: compras
   fixture: semana_parte9_jueves
+  descripcion: Las compras salen del capital; lo que el socio puso es un aporte.
   turnos:
     - socio: Daniel pagó una caja de su bolsillo, 63$ por pago móvil
       llamadas:
+        - herramienta: registrar_aporte
+          args: {socio: Daniel, monto_usd: "63"}
         - herramienta: registrar_compra
-          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: pago_movil, pagado_por: Daniel}
+          args: {cajas: 1, costo_por_caja_usd: "63", forma_pago: pago_movil}
       prohibidas: [ajustar_precios]
   estado:
     huevos: 453
-    compras_nuevas: [{cajas: 1, forma_pago: pago_movil, pagado_por: Daniel}]
+    aportes_nuevos: [{socio: Daniel, monto_usd: "63.00"}]
+    compras_nuevas: [{cajas: 1, forma_pago: pago_movil}]
 
 # --- Gastos ----------------------------------------------------------------------------
 

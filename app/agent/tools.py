@@ -197,22 +197,17 @@ class CompraInput(ToolInput):
     cajas: int = Field(ge=1, description="Cuántas cajas se compraron")
     costo_por_caja_usd: str = Field(pattern=MONEY, description="Costo de cada caja en $")
     forma_pago: FormaPago
-    pagado_por: str = Field(
-        description="negocio si salió del dinero del negocio, yo si lo pagó quien escribe, el "
-        "nombre de otro socio, o no_dijo"
-    )
     proveedor: str = Field(default="", max_length=120)
     fecha: date = _day()
 
 
-async def _record_purchase(session: AsyncSession, p: CompraInput, ctx: ToolContext) -> Any:
+async def _record_purchase(session: AsyncSession, p: CompraInput, _: ToolContext) -> Any:
     return await purchases.register_purchase(
         session,
         purchases.PurchaseInput(
             box_count=p.cajas,
             cost_per_box_usd=money(p.costo_por_caja_usd),
             payment_method=payment(p.forma_pago),
-            paid_by_partner=await payer(session, p.pagado_por, ctx),
             supplier=p.proveedor or None,
             day=p.fecha,
         ),
@@ -513,7 +508,6 @@ TOOLS: list[Tool] = [
                 "cajas": 1,
                 "costo_por_caja_usd": "63",
                 "forma_pago": "efectivo_usd",
-                "pagado_por": "negocio",
             },
         ),
     ),

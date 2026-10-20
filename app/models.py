@@ -94,12 +94,10 @@ class Purchase(CreatedAt, Base):
     total_usd: Mapped[Decimal]
     total_bs: Mapped[Decimal]
     payment_method: Mapped[PaymentMethod]
-    paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"))
     note: Mapped[str | None] = mapped_column(Text)
     voided: Mapped[bool] = mapped_column(server_default=text("false"))
     void_reason: Mapped[str | None] = mapped_column(Text)
 
-    paid_by_partner: Mapped[Partner | None] = relationship(lazy="joined")
     boxes: Mapped[list["Box"]] = relationship(back_populates="purchase", order_by="Box.number")
 
     __table_args__ = (CheckConstraint("box_count > 0", name="box_count_positive"),)
@@ -205,6 +203,7 @@ class Settlement(CreatedAt, Base):
     box_profit_usd: Mapped[Decimal]
     expenses_usd: Mapped[Decimal]
     reserve_usd: Mapped[Decimal]
+    reinvest_usd: Mapped[Decimal] = mapped_column(server_default=text("0"))
     net_profit_usd: Mapped[Decimal]
     rate: Mapped[Decimal] = mapped_column(Rate)
     amount_bs: Mapped[Decimal]

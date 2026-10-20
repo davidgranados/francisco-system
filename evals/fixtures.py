@@ -54,9 +54,7 @@ async def _partners_and_rates(factory: Factory, until: date) -> None:
             await _call(factory, rates.set_rate, rates.SetRateInput(day=day, rate=rate))
 
 
-async def _buy(
-    factory: Factory, day: date, cost: str, paid_by: str | None = None, count: int = 1
-) -> None:
+async def _buy(factory: Factory, day: date, cost: str, count: int = 1) -> None:
     await _call(
         factory,
         purchases.register_purchase,
@@ -66,7 +64,6 @@ async def _buy(
             cost_per_box_usd=D(cost),
             payment_method=PaymentMethod.CASH_USD,
             supplier="Granja X",
-            paid_by_partner=paid_by,
         ),
     )
 

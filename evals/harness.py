@@ -257,7 +257,6 @@ async def snapshot(factory: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
                     "costo_por_caja_usd": _money(p.cost_per_box_usd),
                     "total_usd": _money(p.total_usd),
                     "forma_pago": p.payment_method.value,
-                    "pagado_por": p.paid_by_partner.name if p.paid_by_partner else "negocio",
                     "anulada": p.voided,
                 }
                 for p in purchases

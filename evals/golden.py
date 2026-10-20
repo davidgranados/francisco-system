@@ -17,7 +17,6 @@ DEFAULT_ARGS: dict[str, dict[str, Any]] = {
     "registrar_venta": {"cajas": 0, "cartones": 0, "medios": 0, "sueltos": 0},
     "registrar_merma": {"cartones": 0, "medios": 0, "sueltos": 0},
     "registrar_conteo": {"cajas": 0, "cartones": 0, "medios": 0, "sueltos": 0},
-    "registrar_compra": {"pagado_por": "negocio"},
     "registrar_gasto": {"pagado_por": "negocio", "moneda": "usd"},
     "preparar_cierre": {"reserva": "0"},
     "preparar_anulacion": {"motivo": "error al anotar"},

@@ -12,7 +12,7 @@ from app.domain import rules
 from app.domain.errors import DomainError
 from app.domain.types import BoxStatus, PaymentMethod
 from app.models import Box, Purchase
-from app.services import partners, rates
+from app.services import rates
 from app.services.boxes import BoxView, views_of
 from app.services.ledger import boxes_with_eggs
 
@@ -23,10 +23,6 @@ class PurchaseInput(BaseModel):
     payment_method: PaymentMethod
     day: date | None = Field(default=None, description="Fecha de la compra; por defecto hoy")
     supplier: str | None = Field(default=None, max_length=120)
-    paid_by_partner: str | None = Field(
-        default=None,
-        description="Nombre del socio que pagó de su bolsillo; vacío si pagó el negocio",
-    )
     note: str | None = None
 
 
@@ -44,7 +40,6 @@ class PurchaseView(BaseModel):
     total_usd: Decimal
     total_bs: Decimal
     payment_method: PaymentMethod
-    paid_by_partner: str | None
     note: str | None
     voided: bool
     void_reason: str | None
@@ -69,7 +64,6 @@ async def _view(session: AsyncSession, purchase: Purchase) -> PurchaseView:
         total_usd=purchase.total_usd,
         total_bs=purchase.total_bs,
         payment_method=purchase.payment_method,
-        paid_by_partner=purchase.paid_by_partner.name if purchase.paid_by_partner else None,
         note=purchase.note,
         voided=purchase.voided,
         void_reason=purchase.void_reason,
@@ -104,9 +98,6 @@ async def register_purchase(session: AsyncSession, data: PurchaseInput) -> Regis
     await lock_inventory(session)
     day = data.day or today()
     rate = await rates.rate_for(session, day)
-    payer = (
-        await partners.find_by_name(session, data.paid_by_partner) if data.paid_by_partner else None
-    )
     holdings = await boxes_with_eggs(session)
     selling = holdings[0][0] if holdings else None
     total_usd = data.cost_per_box_usd * data.box_count
@@ -119,7 +110,6 @@ async def register_purchase(session: AsyncSession, data: PurchaseInput) -> Regis
         total_usd=total_usd,
         total_bs=rules.to_bs(total_usd, rate.rate),
         payment_method=data.payment_method,
-        paid_by_partner=payer,
         note=data.note,
     )
     session.add(purchase)

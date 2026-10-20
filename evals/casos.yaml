@@ -289,6 +289,25 @@
     aportes_nuevos: [{socio: Daniel, monto_usd: "63.00"}]
     compras_nuevas: [{cajas: 1, forma_pago: pago_movil}]
 
+- id: compra_sin_capital_y_aporte
+  categoria: compras
+  fixture: semana_parte9_lunes
+  descripcion: "Quedan $ 140 de capital: 3 cajas a 60 no se registran hasta que alguien aporta 40."
+  turnos:
+    - socio: compré 3 cajas a 60 en efectivo
+      prohibidas: [registrar_compra]
+      menciona: ["40,00", "aporte"]
+    - socio: Daniel pone los 40
+      llamadas:
+        - herramienta: registrar_aporte
+          args: {socio: Daniel, monto_usd: "40"}
+        - herramienta: registrar_compra
+          args: {cajas: 3, costo_por_caja_usd: "60", forma_pago: efectivo_usd}
+  estado:
+    huevos: 1440
+    aportes_nuevos: [{socio: Daniel, monto_usd: "40.00"}]
+    compras_nuevas: [{cajas: 3, total_usd: "180.00"}]
+
 # --- Gastos ----------------------------------------------------------------------------
 
 - id: gasto_pagado_por_quien_escribe
@@ -562,7 +581,7 @@
       llamadas:
         - herramienta: consultar
           args: {que: dinero}
-      menciona: ["48,98"]
+      menciona: ["77,00", "74,02"]
 
 - id: consulta_caja_que_se_vende
   categoria: consultas
@@ -665,6 +684,25 @@
       menciona: ["confirmar"]
   estado:
     cierres_nuevos: []
+
+- id: cierre_con_reinversion
+  categoria: cierre
+  fixture: semana_parte9_domingo
+  descripcion: La reinversión vuelve al capital y sale de lo que se reparte.
+  turnos:
+    - socio: haz el cierre, sin reserva, y deja 2 dólares para el capital
+      llamadas:
+        - herramienta: preparar_cierre
+          args: {reserva: "0", reinversion: ["2", "2.00", "2,00"]}
+      pendiente: true
+      menciona: ["7,52"]
+    - boton: confirmar
+      menciona: ["4,51"]
+  estado:
+    pendientes_abiertos: 0
+    gastos_devueltos: [2]
+    cierres_nuevos:
+      - {reinversion_usd: "2.00", ganancia_neta_usd: "7.52", partes: {Francisco: "4.51", Daniel: "3.01"}}
 
 # --- Correcciones ----------------------------------------------------------------------
 

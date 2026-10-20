@@ -221,3 +221,36 @@ async def test_a_developer_can_prepare_and_confirm_a_void_and_a_partner_cannot(c
     done = await resolve_pending(SessionLocal, prepared.pending_id, DEV, confirm=True)
     assert done.outcome == tools.pending.Outcome.CONFIRMED
     assert [s.voided for s in await call(sales.list_sales)] == [True]
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_purchase_the_capital_cannot_pay_tells_the_model_the_aporte_missing(
+    call: Call,
+) -> None:
+    await call(rates.set_rate, rates.SetRateInput(day=today(), rate=D("880.00")))
+    compra = {"cajas": 2, "costo_por_caja_usd": "60", "forma_pago": "efectivo_usd"}
+
+    refused = await _run("registrar_compra", compra)
+    assert refused.is_error
+    assert "Falta un aporte de $ 120,00" in refused.content
+    assert await call(purchases.list_purchases) == []
+
+    assert not (await _run("registrar_aporte", {"socio": "yo", "monto_usd": "120"})).is_error
+    assert not (await _run("registrar_compra", compra)).is_error
+    funds_now = json.loads((await _run("consultar", {"que": "dinero"})).content)
+    assert (funds_now["capital_usd"], funds_now["contributed_by_partner"]) == (
+        "0.00",
+        [{"partner": "Socio A", "amount_usd": "120.00"}],
+    )
+
+
+def test_the_cierre_takes_reserve_and_reinvestment_each_in_dollars_or_percent() -> None:
+    closing = tools.CierreInput(reserva="10%", reinversion="5,00").settlement_input()
+    assert (closing.reserve_percent, closing.reserve_usd) == (D("0.1"), None)
+    assert (closing.reinvest_usd, closing.reinvest_percent) == (D("5.00"), None)
+    nothing = tools.CierreInput(reserva="0").settlement_input()
+    assert (nothing.reserve_usd, nothing.reinvest_usd, nothing.reinvest_percent) == (
+        None,
+        None,
+        None,
+    )

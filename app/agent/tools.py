@@ -27,6 +27,7 @@ from app.services import (
     boxes,
     contributions,
     expenses,
+    funds,
     inventory,
     partners,
     pricing,
@@ -348,21 +349,38 @@ async def _mark_reimbursed(session: AsyncSession, p: DevolucionInput, _: ToolCon
     return await expenses.mark_reimbursed(session, p.gasto_id, expenses.ReimburseInput(day=p.fecha))
 
 
+def amount_or_fraction(text: str) -> tuple[Decimal | None, Decimal | None]:
+    """Read "10%" as a fraction, "5,00" as an amount in $ and "0" as nothing."""
+    text = text.strip()
+    if text.endswith("%"):
+        return None, money(text[:-1]) / 100
+    return money(text) or None, None
+
+
 class CierreInput(ToolInput):
     reserva: str = Field(
         pattern=RESERVE,
-        description="0 si no hay reserva; un monto en $ (ej. 5,00) o un porcentaje (ej. 10%)",
+        description="Va a la caja de ahorros. 0 si no hay reserva; un monto en $ (ej. 5,00) o "
+        "un porcentaje (ej. 10%)",
+    )
+    reinversion: str = Field(
+        default="0",
+        pattern=RESERVE,
+        description="Vuelve al capital para comprar cajas. 0 si no hay; un monto en $ o un "
+        "porcentaje, como la reserva",
     )
     fecha: date = _day()
 
     def settlement_input(self) -> settlements.SettlementInput:
-        text = self.reserva.strip()
-        if text.endswith("%"):
-            return settlements.SettlementInput(
-                day=self.fecha, reserve_percent=money(text[:-1]) / 100
-            )
-        amount = money(text)
-        return settlements.SettlementInput(day=self.fecha, reserve_usd=amount or None)
+        reserve_usd, reserve_percent = amount_or_fraction(self.reserva)
+        reinvest_usd, reinvest_percent = amount_or_fraction(self.reinversion)
+        return settlements.SettlementInput(
+            day=self.fecha,
+            reserve_usd=reserve_usd,
+            reserve_percent=reserve_percent,
+            reinvest_usd=reinvest_usd,
+            reinvest_percent=reinvest_percent,
+        )
 
 
 async def _settle(session: AsyncSession, p: CierreInput, _: ToolContext) -> Any:
@@ -409,7 +427,7 @@ QUERIES: dict[str, Callable[[AsyncSession, date], Awaitable[Any]]] = {
     "socios": lambda s, _: partners.list_partners(s),
     "cierres": lambda s, _: settlements.list_settlements(s),
     "tasa": rates.rate_for,
-    "dinero": lambda s, _: reports.cash_flow(s),
+    "dinero": lambda s, _: funds.balances(s),
 }
 
 
@@ -497,9 +515,12 @@ TOOLS: list[Tool] = [
     Tool(
         "registrar_compra",
         "Registra la compra de cajas de huevos y crea las cajas numeradas con sus precios. "
-        "Úsala cuando el socio dice que compró cajas y a cuánto cada una. Si la respuesta trae "
-        "price_notice, la caja nueva es más cara que la que se vende: díselo y ofrece subir los "
-        "precios con ajustar_precios. No la uses para gastos que no son huevos.",
+        "Úsala cuando el socio dice que compró cajas y a cuánto cada una. Toda compra se paga "
+        "con el capital del negocio; si un socio puso el dinero, primero registrar_aporte. Si "
+        "el capital no alcanza, no se guarda y el error dice cuánto falta: explícalo y ofrece "
+        "registrar ese aporte. Si la respuesta trae price_notice, la caja nueva es más cara que "
+        "la que se vende: díselo y ofrece subir los precios con ajustar_precios. No la uses "
+        "para gastos que no son huevos.",
         CompraInput,
         _record_purchase,
         ToolKind.WRITE,
@@ -547,9 +568,10 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "registrar_aporte",
-        "Registra dinero que un socio mete al negocio (un aporte). No es ganancia ni venta. "
-        "Úsala solo cuando el socio dice que puso o aportó dinero para el negocio, no cuando "
-        "pagó un gasto de su bolsillo (eso es registrar_gasto con pagado_por).",
+        "Registra dinero que un socio mete al negocio (un aporte). Se suma al capital, que es "
+        "con lo que se compran las cajas. No es ganancia ni venta. Úsala cuando el socio dice "
+        "que puso o aportó dinero, o que pagó cajas de su bolsillo; no cuando pagó un gasto de "
+        "su bolsillo (eso es registrar_gasto con pagado_por).",
         AporteInput,
         _record_contribution,
         ToolKind.WRITE,
@@ -585,15 +607,21 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "preparar_cierre",
-        "Prepara el cierre y el reparto: cajas terminadas con su caja siguiente comprada, "
-        "gastos pendientes, reserva, ganancia neta, parte de cada socio y devoluciones. No "
-        "guarda nada: devuelve la vista previa y el bot le pone al mensaje los botones "
-        "Confirmar y Cancelar. Úsala cuando el socio pide el cierre, la repartición o 'cuánto "
-        "nos toca'. Muestra el reparto y dile que toque Confirmar; un 'sí' escrito no confirma.",
+        "Prepara el cierre de la caja chica y el reparto: cajas terminadas con su caja "
+        "siguiente comprada, capital devuelto (costo de reponerlas), gastos pendientes, "
+        "reserva (a la caja de ahorros), reinversión (al capital), utilidades de cada socio, "
+        "devoluciones y cómo quedan caja chica, capital y ahorros. No guarda nada: devuelve la "
+        "vista previa y el bot le pone al mensaje los botones Confirmar y Cancelar. Úsala "
+        "cuando el socio pide el cierre, la repartición o 'cuánto nos toca'. Muestra el "
+        "reparto y dile que toque Confirmar; un 'sí' escrito no confirma.",
         CierreInput,
         _settle,
         ToolKind.CONFIRM,
-        ({"reserva": "0"}, {"reserva": "10%"}, {"reserva": "5,00"}),
+        (
+            {"reserva": "0", "reinversion": "0"},
+            {"reserva": "10%", "reinversion": "0"},
+            {"reserva": "5,00", "reinversion": "20%"},
+        ),
     ),
     Tool(
         "preparar_anulacion",
@@ -613,7 +641,8 @@ TOOLS: list[Tool] = [
         "promedio), precios (lista del día en $ y Bs), cajas (estado de cada caja), ventas (las "
         "de un día, con su id), compras (las últimas, con su id), gastos_pendientes (sin cierre "
         "o por devolver a un socio, con su id), aportes, socios, cierres, tasa (BCV de un día), "
-        "dinero (lo que entró y salió del negocio desde el principio).",
+        "dinero (cuánto hay en el capital, la caja chica y la caja de ahorros, y cuánto aportó "
+        "cada socio).",
         ConsultaInput,
         _query,
         ToolKind.READ,

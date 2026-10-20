@@ -292,6 +292,7 @@ async def snapshot(factory: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
                 "ganancia_cajas_usd": _money(settlement.box_profit_usd),
                 "gastos_usd": _money(settlement.expenses_usd),
                 "reserva_usd": _money(settlement.reserve_usd),
+                "reinversion_usd": _money(settlement.reinvest_usd),
                 "ganancia_neta_usd": _money(settlement.net_profit_usd),
                 "partes": {
                     share.partner.name: _money(share.amount_usd) for share in settlement.shares

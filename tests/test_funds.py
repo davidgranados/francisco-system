@@ -218,3 +218,19 @@ async def test_reserve_and_reinvestment_cannot_take_more_than_the_profit(call: C
         settlements.SettlementInput(day=DAY, reserve_usd=D("5.00"), reinvest_usd=D("5.10")),
     )
     assert exact.net_profit_usd == D("0.00")
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_percents_that_add_up_to_the_whole_profit_split_it_exactly(call: Call) -> None:
+    await _week_to_close(call)
+
+    preview = await call(
+        settlements.preview_settlement,
+        settlements.SettlementInput(day=DAY, reserve_percent=D("0.25"), reinvest_percent=D("0.75")),
+    )
+
+    assert (preview.reserve_usd, preview.reinvest_usd, preview.net_profit_usd) == (
+        D("2.53"),
+        D("7.57"),
+        D("0.00"),
+    )

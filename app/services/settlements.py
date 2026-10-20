@@ -145,6 +145,9 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
     base = box_profit - expenses_usd
     reserve = rules.set_aside(base, data.reserve_usd, data.reserve_percent)
     reinvest = rules.set_aside(base, data.reinvest_usd, data.reinvest_percent)
+    if data.reinvest_percent is not None and data.reserve_percent is not None:
+        # Two percents rounded apart can overshoot by a cent; the reinvestment absorbs it.
+        reinvest = min(reinvest, max(base - reserve, Decimal("0.00")))
     if reserve + reinvest > max(base, Decimal("0.00")):
         raise DomainError(
             f"La reserva ({rules.format_usd(reserve)}) y la reinversión "

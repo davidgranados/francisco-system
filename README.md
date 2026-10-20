@@ -317,11 +317,27 @@ Con "¿Cuánto nos toca?", el bot muestra el cierre con el reparto y dos botones
 
 Anular una venta o una compra funciona igual, con botones. Si al bot le falta un dato (por ejemplo cómo te pagaron), te lo pregunta antes de anotar. `/nuevo` borra la conversación con el bot, pero no borra nada de lo anotado.
 
+## La página web
+
+La misma URL del servicio abre una página para mirar las cuentas: ventas, compras, gastos, cajas de huevos, existencia, cierres, aportes, movimientos de dinero, la plata de cada fondo, la tasa y los precios. Solo se lee. Para anotar algo se sigue usando el bot.
+
+Para entrar:
+
+1. La persona toca su nombre. Aparecen los socios activos con Telegram y los usuarios de `DEV_TELEGRAM_USERS`.
+2. El bot le manda un código de 6 números por Telegram. Vence en 10 minutos, y con 5 errores hay que pedir otro. Entre un pedido y otro tiene que pasar un minuto.
+3. La persona escribe el código y queda adentro 90 días en ese navegador.
+
+El bot solo puede escribirle a quien ya tocó «Iniciar» en el chat. Si un socio se desactiva, su sesión deja de servir en el siguiente pedido.
+
+La sesión es una cookie, y con ella solo se puede leer: cualquier cambio por la API sigue pidiendo `X-API-Key`. Las listas vienen por páginas (`?page=1&page_size=20`, hasta 100 por página). El código de la página está en `web/`, y su `README.md` dice cómo correrla en local. El `Dockerfile` la construye y la API la sirve en el mismo dominio.
+
 ## Cómo está organizado el código
 
 - `app/domain/rules.py` tiene las reglas sin base de datos: precios, redondeo, PEPS, reparto y estados de la caja.
 - `app/services/` tiene toda la lógica del negocio. La API y el bot llaman a las mismas funciones.
-- `app/api/` tiene un router por servicio, bajo `/api/v1`.
+- `app/api/` tiene un router por servicio, bajo `/api/v1`, y `app/api/auth.py` la entrada a la página web.
+- `app/web.py` sirve la página web ya construida.
+- `web/` tiene la página web en React.
 - `app/agent/` tiene:
   - las herramientas y el prompt del bot;
   - el loop con Claude;

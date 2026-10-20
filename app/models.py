@@ -356,9 +356,7 @@ class LoginCode(Base):
 
     __tablename__ = "login_codes"
 
-    telegram_user_id: Mapped[int] = mapped_column(
-        BigInteger, primary_key=True, autoincrement=False
-    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     code_hash: Mapped[str] = mapped_column(String(64))
     sent_at: Mapped[datetime]
     expires_at: Mapped[datetime]

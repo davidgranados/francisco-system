@@ -175,6 +175,9 @@ class TelegramBridge:
         await self.application.stop()
         await self.application.shutdown()
 
+    async def send_message(self, chat_id: int, text: str) -> None:
+        await self.application.bot.send_message(chat_id, text)
+
     async def enqueue(self, payload: dict[str, Any]) -> None:
         await self.application.update_queue.put(Update.de_json(payload, self.application.bot))
 

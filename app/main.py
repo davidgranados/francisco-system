@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.agent import telegram
 from app.agent.loop import Agent
+from app.api import auth
 from app.api.v1 import router as v1_router
 from app.config import settings
 from app.db import SessionLocal, engine
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Francisco System", description="Cuentas del negocio de huevos.", lifespan=lifespan
 )
+app.include_router(auth.router)
 app.include_router(v1_router)
 app.include_router(telegram.router)
 

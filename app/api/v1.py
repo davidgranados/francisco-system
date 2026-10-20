@@ -15,9 +15,9 @@ from app.api import (
     settlements,
     transfers,
 )
-from app.api.deps import require_api_key
+from app.api.deps import require_access
 
-router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_access)])
 for module in (
     partners,
     rates,

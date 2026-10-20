@@ -129,6 +129,7 @@ async def test_the_cash_flow_opens_each_fund_where_the_day_before_closed(call: C
         "entered_usd": D("20.00"),
         "left_usd": D("60.00"),
         "closing_usd": D("60.00"),
+        "by_kind": {funds.Kind.CONTRIBUTION: D("20.00"), funds.Kind.PURCHASE: D("-60.00")},
     }
     assert (flow.petty_cash.opening_usd, flow.petty_cash.closing_usd) == (D("0.00"), D("12.50"))
     assert (await call(funds.balances)).capital_usd == flow.capital.closing_usd
@@ -234,3 +235,87 @@ async def test_percents_that_add_up_to_the_whole_profit_split_it_exactly(call: C
         D("7.57"),
         D("0.00"),
     )
+
+
+MONEY_AFTER = {"reimbursements", "petty_cash_after_usd", "capital_after_usd", "savings_after_usd"}
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_two_cierres_on_one_day_each_keep_the_balances_their_preview_showed(
+    call: Call,
+) -> None:
+    await _week_to_close(call)
+    await call(
+        sales.record_sale,
+        sales.SaleInput(day=DAY, cartons=1, payment_method=PaymentMethod.CASH_USD),
+    )
+    first = settlements.SettlementInput(day=DAY, reserve_percent=D("0.10"), reinvest_usd=D("2.00"))
+    first_preview = await call(settlements.preview_settlement, first)
+    await call(settlements.execute_settlement, first)
+    await call(
+        expenses.record_expense,
+        expenses.ExpenseInput(
+            day=DAY, concept="Agua", amount_usd=D("1.00"), paid_by_partner="Socio A"
+        ),
+    )
+    second = settlements.SettlementInput(day=DAY)
+    second_preview = await call(settlements.preview_settlement, second)
+    await call(settlements.execute_settlement, second)
+
+    assert (first_preview.petty_cash_after_usd, second_preview.petty_cash_after_usd) == (
+        D("6.60"),
+        D("5.60"),
+    )
+    second_stored, first_stored = await call(settlements.list_settlements)
+    assert first_stored.model_dump(include=MONEY_AFTER) == first_preview.model_dump(
+        include=MONEY_AFTER
+    )
+    assert second_stored.model_dump(include=MONEY_AFTER) == second_preview.model_dump(
+        include=MONEY_AFTER
+    )
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_backdated_purchase_is_refused_when_a_later_day_already_spent_the_capital(
+    call: Call,
+) -> None:
+    await _contribute(call, "Socio A", "100.00", day=date(2026, 10, 13))
+    await call(
+        purchases.register_purchase,
+        purchases.PurchaseInput(
+            day=date(2026, 10, 15),
+            box_count=1,
+            cost_per_box_usd=D("100.00"),
+            payment_method=PaymentMethod.CASH_USD,
+        ),
+    )
+    await _contribute(call, "Socio B", "50.00", day=date(2026, 10, 16))
+
+    with pytest.raises(DomainError, match="Falta un aporte de \\$ 50,00"):
+        await call(purchases.register_purchase, _purchase(1, "50.00"))
+    assert len(await call(purchases.list_purchases)) == 1
+    assert (await call(funds.balances)).capital_usd == D("50.00")
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_purchase_dated_before_the_aporte_that_would_pay_it_is_refused(
+    call: Call,
+) -> None:
+    await _contribute(call, "Socio A", "100.00", day=date(2026, 10, 15))
+
+    with pytest.raises(DomainError, match="El capital disponible es \\$ 0,00"):
+        await call(purchases.register_purchase, _purchase(1, "60.00"))
+    assert await call(purchases.list_purchases) == []
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_the_report_counts_as_gastos_only_what_left_the_caja_chica(call: Call) -> None:
+    await _week_to_close(call)
+    period = reports.PeriodInput(date_from=DAY, date_to=DAY)
+
+    owed = await call(reports.summary, period)
+    assert (owed.expenses_usd, owed.pending_reimbursement_usd) == (D("0.40"), D("1.50"))
+
+    await call(settlements.execute_settlement, settlements.SettlementInput(day=DAY))
+    paid = await call(reports.summary, period)
+    assert (paid.expenses_usd, paid.pending_reimbursement_usd) == (D("1.90"), D("0.00"))

@@ -10,7 +10,7 @@ from app.config import settings, today
 from app.db import lock_inventory
 from app.domain import rules
 from app.domain.errors import DomainError
-from app.domain.types import BoxStatus, PaymentMethod
+from app.domain.types import BoxStatus, Fund, PaymentMethod
 from app.models import Box, Purchase
 from app.services import funds, rates
 from app.services.boxes import BoxView, views_of
@@ -99,7 +99,7 @@ async def register_purchase(session: AsyncSession, data: PurchaseInput) -> Regis
     day = data.day or today()
     rate = await rates.rate_for(session, day)
     total_usd = data.cost_per_box_usd * data.box_count
-    capital = (await funds.balances(session)).capital_usd
+    capital, _ = await funds.lowest_balance(session, Fund.CAPITAL, since=day)
     if capital < total_usd:
         raise DomainError(
             f"El capital disponible es {rules.format_usd(capital)} y la compra cuesta "

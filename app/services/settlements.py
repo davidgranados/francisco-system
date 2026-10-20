@@ -89,6 +89,7 @@ class SettlementView(SettlementPreview):
 @dataclass(frozen=True)
 class _Plan:
     preview: SettlementPreview
+    settlement: Settlement
     boxes: list[Box]
     expenses: list[Expense]
     partners: list[Partner]
@@ -164,8 +165,24 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
             name = expense.paid_by_partner.name
             reimbursements[name] = reimbursements.get(name, Decimal(0)) + expense.amount_usd
     next_box_money = sum((p.next_box_cost_usd for p in profits), Decimal("0.00"))
-    before = await funds.balances(session, until=day)
-    to_capital = next_box_money + reinvest
+    settlement = Settlement(
+        day=day,
+        box_profit_usd=box_profit,
+        expenses_usd=expenses_usd,
+        reserve_usd=reserve,
+        reinvest_usd=reinvest,
+        net_profit_usd=net,
+        rate=rate.rate,
+        amount_bs=rules.to_bs(distributed, rate.rate),
+        next_box_money_usd=next_box_money,
+        note=data.note,
+    )
+    planned = funds.settlement_postings(
+        settlement,
+        distributed=sum(amounts, Decimal("0.00")),
+        reimbursed=sum(reimbursements.values(), Decimal("0.00")),
+    )
+    after = await funds.balances(session, funds.Cutoff(day), planned)
     preview = SettlementPreview(
         day=day,
         boxes=profits,
@@ -183,20 +200,20 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         shares_total_usd=sum(amounts, Decimal("0.00")),
         rate=rate.rate,
         rate_stale=rate.stale,
-        amount_bs=rules.to_bs(distributed, rate.rate),
+        amount_bs=settlement.amount_bs,
         next_box_money_usd=next_box_money,
         reimbursements=[Reimbursement(partner=k, amount_usd=v) for k, v in reimbursements.items()],
-        petty_cash_after_usd=before.petty_cash_usd
-        - to_capital
-        - reserve
-        - sum(amounts, Decimal("0.00"))
-        - sum(reimbursements.values(), Decimal("0.00")),
-        capital_after_usd=before.capital_usd + to_capital,
-        savings_after_usd=before.savings_usd + reserve,
+        petty_cash_after_usd=after.petty_cash_usd,
+        capital_after_usd=after.capital_usd,
+        savings_after_usd=after.savings_usd,
         note=data.note,
     )
     return _Plan(
-        preview=preview, boxes=[box for box, _ in closable], expenses=expenses, partners=members
+        preview=preview,
+        settlement=settlement,
+        boxes=[box for box, _ in closable],
+        expenses=expenses,
+        partners=members,
     )
 
 
@@ -208,18 +225,7 @@ async def execute_settlement(session: AsyncSession, data: SettlementInput) -> Se
     await lock_inventory(session)
     plan = await _plan(session, data)
     preview = plan.preview
-    settlement = Settlement(
-        day=preview.day,
-        box_profit_usd=preview.box_profit_usd,
-        expenses_usd=preview.expenses_usd,
-        reserve_usd=preview.reserve_usd,
-        reinvest_usd=preview.reinvest_usd,
-        net_profit_usd=preview.net_profit_usd,
-        rate=preview.rate,
-        amount_bs=preview.amount_bs,
-        next_box_money_usd=preview.next_box_money_usd,
-        note=preview.note,
-    )
+    settlement = plan.settlement
     session.add(settlement)
     await session.flush()
     for partner, share in zip(plan.partners, preview.shares, strict=True):
@@ -275,7 +281,7 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
             select(Expense).where(Expense.settlement_id == settlement.id).order_by(Expense.day)
         )
     )
-    after = await funds.balances(session, until=settlement.day)
+    after = await funds.balances(session, funds.Cutoff(settlement.day, settlement.id))
     return SettlementView(
         id=settlement.id,
         day=settlement.day,

@@ -60,13 +60,15 @@ finished ──(entra en un cierre)──▶ settled
 
 ### Fondos
 
-El dinero del negocio está en tres fondos. No tienen tabla: `app/services/funds.py` los suma de las filas que ya mueven dinero, así una anulación o una corrección nunca deja un saldo desfasado.
+El dinero del negocio está en tres fondos. No tienen tabla ni saldo guardado: `app/services/funds.py` arma un diario de asientos (`Posting`: día, fondo, monto con signo, tipo y el cierre que lo hizo) con un `UNION ALL` sobre las filas que ya mueven dinero, así una anulación o una corrección nunca deja un saldo desfasado.
 
-- **Capital**: compra las cajas. Σ aportes − Σ compras no anuladas + Σ cierres (dinero de la próxima caja + reinversión).
-- **Caja chica**: Σ ventas no anuladas − Σ gastos que pagó el negocio − Σ gastos devueltos a socios − Σ cierres (dinero de la próxima caja + reinversión + reserva) − Σ partes repartidas a socios.
-- **Caja de ahorros**: Σ reservas de los cierres.
+- **Capital**: + aportes − compras no anuladas + en cada cierre el dinero de la próxima caja y la reinversión.
+- **Caja chica**: + ventas no anuladas − gastos que pagó el negocio − gastos devueltos a socios (el día de la devolución) − en cada cierre el dinero de la próxima caja, la reinversión, la reserva y las utilidades.
+- **Caja de ahorros**: + reservas de los cierres.
 
-Las partes repartidas (utilidades) salen del negocio. Un gasto que pagó un socio sale de la caja chica el día que se le devuelve. `funds.balances(session, until)` da los tres saldos al final de un día y cuánto aportó cada socio; `reports.cash_flow` da, por fondo, saldo inicial, entradas, salidas y saldo final de un período.
+Un movimiento entre dos fondos son dos asientos del mismo monto y signo contrario, así la suma de los fondos solo cambia con dinero que entra al negocio o sale de él (aportes, ventas, compras, gastos, devoluciones y utilidades). Dentro de un día, un cierre cuenta después de todo lo demás, y dos cierres del mismo día van en el orden en que se hicieron: `funds.balances(session, Cutoff(día, cierre))` da los saldos justo después de ese cierre, y la vista previa del cierre suma sus asientos planeados (`settlement_postings`) a lo guardado sin escribir nada. `funds.flows` da, por fondo, saldo inicial, entradas, salidas, saldo final y lo movido por tipo de asiento, y es lo que muestra `reports.cash_flow`. `funds.lowest_balance` da el saldo más bajo al final de cada día desde una fecha.
+
+En el resumen de un período, "gastos" es lo que salió de la caja chica: los gastos del negocio y los gastos de socios que se devolvieron en esos días. Los que un socio pagó y al final del período no se le habían devuelto salen aparte, como pendientes de devolver.
 
 ### Formas de pago
 
@@ -89,7 +91,7 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 11. **Costo promedio** (amb. 15). Se calcula sobre las cajas con huevos: valor de cada caja = costo × huevos restantes ÷ 360. Promedio por caja = valor total ÷ (huevos totales ÷ 360). Es solo informativo.
 12. **Costos unitarios** (amb. 17). Se guardan sin redondear y se muestran con 4 decimales.
 13. **Tasa del día**. Siempre la del día de la operación. Si no hay, se busca en la API y se guarda. Una operación con fecha pasada usa la tasa guardada de esa fecha o la última anterior.
-14. **Compras desde el capital** (amb. 13). Toda compra la paga el capital; un socio no paga cajas. Si el capital disponible es menor que el total, la compra se rechaza diciendo cuánto falta aportar. La revisión corre bajo el mismo candado del inventario que la compra, así dos compras a la vez no pasan las dos. Las compras que un socio había pagado antes de este cambio se pasaron a aportes suyos en la migración `3e5b9a7c4d12`.
+14. **Compras desde el capital** (amb. 13). Toda compra la paga el capital; un socio no paga cajas. Si el capital no alcanza, la compra se rechaza diciendo cuánto falta aportar. Una compra con fecha pasada se revisa contra el saldo más bajo de cada día desde su fecha hasta hoy, no solo contra el de hoy. La revisión corre bajo el mismo candado del inventario que la compra, así dos compras a la vez no pasan las dos. Las compras que un socio había pagado antes de este cambio se pasaron a aportes suyos en la migración `3e5b9a7c4d12`.
 15. **Destino del dinero en el cierre** (Parte 8). Primero vuelve al capital el costo de reponer las cajas cerradas (el dinero de la próxima caja). Los gastos y devoluciones siguen como antes. De la ganancia que queda salen la reinversión (al capital) y la reserva (a la caja de ahorros); el resto son las utilidades de los socios. La vista previa muestra cómo quedan caja chica, capital y ahorros al final del día del cierre.
 
 ## Servicios

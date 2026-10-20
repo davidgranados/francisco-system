@@ -34,3 +34,9 @@ class MovementKind(StrEnum):
 class RateSource(StrEnum):
     BCV_API = "bcv_api"
     MANUAL = "manual"
+
+
+class Fund(StrEnum):
+    CAPITAL = "capital"
+    PETTY_CASH = "petty_cash"
+    SAVINGS = "savings"

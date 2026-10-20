@@ -13,14 +13,12 @@ function route(transfer: Transfer): string {
   return `Sale de ${origin}`
 }
 
-export function TransfersScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function TransfersScreen() {
   return (
     <>
       <PageHeader title="Movimientos de dinero" />
       <PagedList
-        options={queries.transfers(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.transfers}
         empty="Todavía no hay movimientos de dinero."
         renderItem={(transfer) => (
           <RecordCard

@@ -5,14 +5,12 @@ import { Fact, RecordCard } from '@/components/RecordCard'
 import { formatDay, formatRate } from '@/lib/format'
 import { rateSourceLabels } from '@/lib/labels'
 
-export function RatesScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function RatesScreen() {
   return (
     <>
       <PageHeader title="Tasa del dólar" />
       <PagedList
-        options={queries.rates(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.rates}
         empty="Todavía no hay tasas guardadas."
         renderItem={(rate) => (
           <RecordCard

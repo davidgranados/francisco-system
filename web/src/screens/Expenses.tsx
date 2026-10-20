@@ -36,7 +36,7 @@ function ExpenseCard({ expense }: { expense: Expense }) {
   )
 }
 
-export function ExpensesScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function ExpensesScreen() {
   return (
     <>
       <PageHeader title="Gastos">
@@ -45,9 +45,7 @@ export function ExpensesScreen({ page, onPage }: { page: number; onPage: (page: 
         </Link>
       </PageHeader>
       <PagedList
-        options={queries.expenses(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.expenses}
         empty="Todavía no hay gastos."
         renderItem={(expense) => <ExpenseCard key={expense.id} expense={expense} />}
       />

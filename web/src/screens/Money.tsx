@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import { queries } from '@/api/queries'
-import type { DateRange } from '@/api/client'
 import { DateRangeForm } from '@/components/DateRangeForm'
 import { FundFlowCard } from '@/components/FundFlowCard'
 import { PageHeader } from '@/components/PageHeader'
@@ -38,18 +37,16 @@ export function MoneyScreen() {
   )
 }
 
-export function SummaryScreen({
-  range,
-  onRange,
-}: {
-  range: DateRange
-  onRange: (range: DateRange) => void
-}) {
+const route = getRouteApi('/app/dinero/resumen')
+
+export function SummaryScreen() {
+  const range = route.useSearch()
+  const navigate = route.useNavigate()
   const summary = useQuery(queries.summary(range))
   return (
     <>
       <PageHeader title="Resumen de un período" back={{ to: '/dinero', label: 'Dinero' }} />
-      <DateRangeForm key={`${range.from}|${range.to}`} value={range} onSubmit={onRange} />
+      <DateRangeForm key={`${range.from}|${range.to}`} value={range} onSubmit={(next) => void navigate({ search: next })} />
       <QueryState query={summary}>
         {(data) => (
           <>

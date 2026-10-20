@@ -4,14 +4,12 @@ import { PagedList } from '@/components/PagedList'
 import { Amounts, Fact, RecordCard } from '@/components/RecordCard'
 import { formatDay } from '@/lib/format'
 
-export function ContributionsScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function ContributionsScreen() {
   return (
     <>
       <PageHeader title="Aportes" />
       <PagedList
-        options={queries.contributions(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.contributions}
         empty="Todavía no hay aportes."
         renderItem={(contribution) => (
           <RecordCard

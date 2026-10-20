@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import { queries } from '@/api/queries'
-import type { DateRange } from '@/api/client'
 import { DateRangeForm } from '@/components/DateRangeForm'
 import { PageHeader } from '@/components/PageHeader'
 import { QueryState } from '@/components/QueryState'
@@ -62,18 +61,16 @@ export function StockScreen() {
   )
 }
 
-export function LedgerScreen({
-  range,
-  onRange,
-}: {
-  range: DateRange
-  onRange: (range: DateRange) => void
-}) {
+const route = getRouteApi('/app/inventario/movimiento')
+
+export function LedgerScreen() {
+  const range = route.useSearch()
+  const navigate = route.useNavigate()
   const ledger = useQuery(queries.ledger(range))
   return (
     <>
       <PageHeader title="Movimiento de huevos" back={{ to: '/inventario', label: 'Huevos que hay' }} />
-      <DateRangeForm key={`${range.from}|${range.to}`} value={range} onSubmit={onRange} />
+      <DateRangeForm key={`${range.from}|${range.to}`} value={range} onSubmit={(next) => void navigate({ search: next })} />
       <QueryState query={ledger}>
         {(rows) =>
           rows.length === 0 ? (

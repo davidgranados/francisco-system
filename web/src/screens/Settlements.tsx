@@ -4,14 +4,12 @@ import { PagedList } from '@/components/PagedList'
 import { Amounts, Fact, RecordCard } from '@/components/RecordCard'
 import { formatDay, formatPercent, formatRate, formatUsd, formatInteger } from '@/lib/format'
 
-export function SettlementsScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function SettlementsScreen() {
   return (
     <>
       <PageHeader title="Cierres" />
       <PagedList
-        options={queries.settlements(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.settlements}
         empty="Todavía no hay cierres."
         renderItem={(settlement) => (
           <RecordCard

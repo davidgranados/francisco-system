@@ -6,12 +6,9 @@ import {
   createRoute,
   createRouter,
   redirect,
-  useNavigate,
-  useSearch,
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
-import type { ComponentType } from 'react'
 import { z } from 'zod'
 import { isUnauthorized } from '@/api/client'
 import { queries } from '@/api/queries'
@@ -40,12 +37,12 @@ interface RouterContext {
 }
 
 const pageSearch = z.object({ page: z.coerce.number().int().min(1).catch(1) })
-const dayParam = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .optional()
-  .catch(undefined)
-const rangeSearch = z.object({ from: dayParam, to: dayParam })
+const dayFormat = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const dayParam = dayFormat.optional().catch(undefined)
+const rangeSearch = z.object({
+  from: dayFormat.default(startOfMonth).catch(startOfMonth),
+  to: dayFormat.default(today).catch(today),
+})
 
 function RouteError({ error, reset }: ErrorComponentProps) {
   return (
@@ -104,51 +101,22 @@ const salesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/ventas',
   validateSearch: pageSearch.extend({ day: dayParam }),
-  component: function Sales() {
-    const { page, day } = salesRoute.useSearch()
-    const navigate = salesRoute.useNavigate()
-    return (
-      <SalesScreen
-        page={page}
-        day={day}
-        onPage={(next) => void navigate({ search: (previous) => ({ ...previous, page: next }) })}
-        onDay={(next) => void navigate({ search: { page: 1, day: next } })}
-      />
-    )
-  },
+  component: SalesScreen,
 })
 
-interface PagedProps {
-  page: number
-  onPage: (page: number) => void
-}
+const purchasesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/compras',
+  validateSearch: pageSearch,
+  component: PurchasesScreen,
+})
 
-function PagedScreen({ Screen }: { Screen: ComponentType<PagedProps> }) {
-  const search: { page?: number } = useSearch({ strict: false })
-  const navigate = useNavigate()
-  return (
-    <Screen
-      page={search.page ?? 1}
-      onPage={(next) => void navigate({ to: '.', search: (previous) => ({ ...previous, page: next }) })}
-    />
-  )
-}
-
-function pagedRoute<Path extends string>(path: Path, Screen: ComponentType<PagedProps>) {
-  return createRoute({
-    getParentRoute: () => appRoute,
-    path,
-    validateSearch: pageSearch,
-    component: () => <PagedScreen Screen={Screen} />,
-  })
-}
-
-const purchasesRoute = pagedRoute('/compras', PurchasesScreen)
-const expensesRoute = pagedRoute('/gastos', ExpensesScreen)
-const contributionsRoute = pagedRoute('/aportes', ContributionsScreen)
-const transfersRoute = pagedRoute('/movimientos', TransfersScreen)
-const settlementsRoute = pagedRoute('/cierres', SettlementsScreen)
-const ratesRoute = pagedRoute('/tasas', RatesScreen)
+const expensesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/gastos',
+  validateSearch: pageSearch,
+  component: ExpensesScreen,
+})
 
 const pendingExpensesRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -156,22 +124,39 @@ const pendingExpensesRoute = createRoute({
   component: PendingExpensesScreen,
 })
 
+const contributionsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/aportes',
+  validateSearch: pageSearch,
+  component: ContributionsScreen,
+})
+
+const transfersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/movimientos',
+  validateSearch: pageSearch,
+  component: TransfersScreen,
+})
+
+const settlementsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/cierres',
+  validateSearch: pageSearch,
+  component: SettlementsScreen,
+})
+
+const ratesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/tasas',
+  validateSearch: pageSearch,
+  component: RatesScreen,
+})
+
 const boxesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/cajas',
   validateSearch: pageSearch.extend({ settled: z.boolean().catch(false) }),
-  component: function Boxes() {
-    const { page, settled } = boxesRoute.useSearch()
-    const navigate = boxesRoute.useNavigate()
-    return (
-      <BoxesScreen
-        page={page}
-        includeSettled={settled}
-        onPage={(next) => void navigate({ search: (previous) => ({ ...previous, page: next }) })}
-        onIncludeSettled={(value) => void navigate({ search: { page: 1, settled: value } })}
-      />
-    )
-  },
+  component: BoxesScreen,
 })
 
 const boxSheetRoute = createRoute({
@@ -181,27 +166,16 @@ const boxSheetRoute = createRoute({
     parse: (params) => ({ number: z.coerce.number().int().positive().parse(params.number) }),
     stringify: (params) => ({ number: String(params.number) }),
   },
-  component: function BoxSheet() {
-    const { number } = boxSheetRoute.useParams()
-    return <BoxSheetScreen number={number} />
-  },
+  component: BoxSheetScreen,
 })
 
 const stockRoute = createRoute({ getParentRoute: () => appRoute, path: '/inventario', component: StockScreen })
-
-function withDefaultRange(search: { from?: string | undefined; to?: string | undefined }) {
-  return { from: search.from ?? startOfMonth(), to: search.to ?? today() }
-}
 
 const ledgerRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/inventario/movimiento',
   validateSearch: rangeSearch,
-  component: function Ledger() {
-    const range = withDefaultRange(ledgerRoute.useSearch())
-    const navigate = ledgerRoute.useNavigate()
-    return <LedgerScreen range={range} onRange={(next) => void navigate({ search: next })} />
-  },
+  component: LedgerScreen,
 })
 
 const moneyRoute = createRoute({ getParentRoute: () => appRoute, path: '/dinero', component: MoneyScreen })
@@ -210,11 +184,7 @@ const summaryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/dinero/resumen',
   validateSearch: rangeSearch,
-  component: function Summary() {
-    const range = withDefaultRange(summaryRoute.useSearch())
-    const navigate = summaryRoute.useNavigate()
-    return <SummaryScreen range={range} onRange={(next) => void navigate({ search: next })} />
-  },
+  component: SummaryScreen,
 })
 
 const pricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/precios', component: PricesScreen })

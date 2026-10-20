@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import { queries } from '@/api/queries'
 import type { Box } from '@/api/schemas'
 import { PageHeader } from '@/components/PageHeader'
@@ -49,17 +49,12 @@ export function BoxCard({ box, link = true }: { box: Box; link?: boolean }) {
   )
 }
 
-export function BoxesScreen({
-  page,
-  includeSettled,
-  onPage,
-  onIncludeSettled,
-}: {
-  page: number
-  includeSettled: boolean
-  onPage: (page: number) => void
-  onIncludeSettled: (value: boolean) => void
-}) {
+const boxesRoute = getRouteApi('/app/cajas')
+const boxSheetRoute = getRouteApi('/app/cajas/$number')
+
+export function BoxesScreen() {
+  const { settled: includeSettled } = boxesRoute.useSearch()
+  const navigate = boxesRoute.useNavigate()
   return (
     <>
       <PageHeader title="Cajas de huevos">
@@ -68,15 +63,13 @@ export function BoxesScreen({
           variant="outline"
           size="lg"
           aria-pressed={includeSettled}
-          onClick={() => onIncludeSettled(!includeSettled)}
+          onClick={() => void navigate({ search: { page: 1, settled: !includeSettled } })}
         >
           {includeSettled ? 'Ocultar las cajas que ya están en un cierre' : 'Mostrar también las cajas que ya están en un cierre'}
         </Button>
       </PageHeader>
       <PagedList
-        options={queries.boxes(page, includeSettled)}
-        page={page}
-        onPage={onPage}
+        options={(page) => queries.boxes(page, includeSettled)}
         empty="No hay cajas para mostrar."
         renderItem={(box) => <BoxCard key={box.number} box={box} />}
       />
@@ -84,7 +77,8 @@ export function BoxesScreen({
   )
 }
 
-export function BoxSheetScreen({ number }: { number: number }) {
+export function BoxSheetScreen() {
+  const { number } = boxSheetRoute.useParams()
   const sheet = useQuery(queries.boxSheet(number))
   return (
     <>

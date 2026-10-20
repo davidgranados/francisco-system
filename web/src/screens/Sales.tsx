@@ -1,3 +1,4 @@
+import { getRouteApi } from '@tanstack/react-router'
 import { PageHeader } from '@/components/PageHeader'
 import { PagedList } from '@/components/PagedList'
 import { Amounts, Fact, RecordCard } from '@/components/RecordCard'
@@ -8,17 +9,12 @@ import { queries } from '@/api/queries'
 import { describeEggAmounts, formatDay, formatInteger, formatRate } from '@/lib/format'
 import { paymentMethodLabels } from '@/lib/labels'
 
-export function SalesScreen({
-  page,
-  day,
-  onPage,
-  onDay,
-}: {
-  page: number
-  day?: string
-  onPage: (page: number) => void
-  onDay: (day: string | undefined) => void
-}) {
+const route = getRouteApi('/app/ventas')
+
+export function SalesScreen() {
+  const { day } = route.useSearch()
+  const navigate = route.useNavigate()
+  const onDay = (next: string | undefined) => void navigate({ search: { page: 1, day: next } })
   return (
     <>
       <PageHeader title="Ventas" />
@@ -39,9 +35,7 @@ export function SalesScreen({
         ) : null}
       </div>
       <PagedList
-        options={queries.sales(page, day)}
-        page={page}
-        onPage={onPage}
+        options={(page) => queries.sales(page, day)}
         empty={day ? `No hay ventas el ${formatDay(day)}.` : 'Todavía no hay ventas.'}
         renderItem={(sale) => (
           <RecordCard

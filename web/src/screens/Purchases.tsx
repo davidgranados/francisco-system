@@ -6,14 +6,12 @@ import { Amounts, Fact, RecordCard } from '@/components/RecordCard'
 import { formatDay, formatRate, formatUsd, pluralize } from '@/lib/format'
 import { boxStatusLabels, paymentMethodLabels } from '@/lib/labels'
 
-export function PurchasesScreen({ page, onPage }: { page: number; onPage: (page: number) => void }) {
+export function PurchasesScreen() {
   return (
     <>
       <PageHeader title="Compras" />
       <PagedList
-        options={queries.purchases(page)}
-        page={page}
-        onPage={onPage}
+        options={queries.purchases}
         empty="Todavía no hay compras."
         renderItem={(purchase) => (
           <RecordCard

@@ -18,7 +18,7 @@ El diseño está en `docs/diseno.md`. Las reglas de redondeo y de ganancia son l
 Necesita Docker y [uv](https://docs.astral.sh/uv/).
 
 ```bash
-docker compose up -d                 # PostgreSQL 16 en localhost:5432
+docker compose up -d                 # PostgreSQL 18 en localhost:5432
 cp .env.example .env                 # y edite API_KEYS
 uv sync
 uv run alembic upgrade head
@@ -39,6 +39,27 @@ Sin `TELEGRAM_BOT_TOKEN` y `TELEGRAM_WEBHOOK_SECRET` el bot queda apagado y la A
 `python -m app.seed` recibe la lista completa de socios activos, cada uno como `Nombre:porcentaje:telegram_id`. Los porcentajes deben sumar 1. El id de Telegram es opcional, pero sin él ese socio no puede usar el bot. Correrlo otra vez con lo mismo no cambia nada, y un socio que no esté en la lista queda inactivo.
 
 Para saber su id de Telegram, escríbale a [@userinfobot](https://t.me/userinfobot).
+
+## Reiniciar o copiar una base
+
+Dos comandos para desarrollo, que se corren desde el checkout:
+
+```bash
+uv run python -m app.reset_db local                                  # o staging
+uv run python -m app.restore_db --from production --to local         # origen: local, staging o production
+```
+
+`reset_db` borra todo lo que tiene la base y le aplica las migraciones de este checkout. Para staging, que el checkout esté en `main`.
+
+`restore_db` saca un dump del origen y lo restaura en el destino, que queda igual al origen. El dump se saca antes de tocar el destino: si falla, el destino queda como estaba. Después de copiar a local, corra `uv run alembic upgrade head` si el checkout trae migraciones nuevas.
+
+Producción nunca es destino. Ninguno de los dos la acepta como destino, se niegan si la URL de destino apunta a la misma base que `PRODUCTION_DATABASE_URL`, y no corren dentro de Railway. Antes de borrar piden escribir el nombre del destino; `--yes` se lo salta.
+
+Las URLs van en `.env`: `DATABASE_URL` (local), `STAGING_DATABASE_URL` y `PRODUCTION_DATABASE_URL`. Las bases de Railway no se ven desde afuera hasta que se les activa un TCP proxy (Railway → servicio Postgres → **Settings → Networking → TCP Proxy**); la URL a copiar es `DATABASE_PUBLIC_URL`. Ese proxy deja la base abierta a internet con su contraseña: quítelo cuando termine.
+
+`pg_dump` y `pg_restore` corren dentro del contenedor `postgres` de `docker compose`, que es Postgres 18 como Railway (`pg_dump` no saca el dump de un servidor más nuevo que él). Para usar los del PATH, ponga `PG_TOOLS=` vacío.
+
+Si tenía la base local en Postgres 16, el volumen viejo (`postgres-data`) queda sin usar: `docker compose up -d` arranca uno nuevo vacío. Llénelo con `reset_db local` o `restore_db`, y borre el viejo con `docker volume rm francisco-system_postgres-data`.
 
 ## Pruebas
 

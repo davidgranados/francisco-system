@@ -16,7 +16,14 @@ from app.domain.types import BoxStatus
 from app.models import Box, EggMovement, Expense, Partner, Settlement, SettlementShare
 from app.services import funds, partners, rates
 from app.services.boxes import BoxProfit, profit_of
-from app.services.expenses import ExpenseView, expense_view, unsettled_until
+from app.services.expenses import (
+    ExpenseView,
+    Reimbursement,
+    by_partner,
+    expense_view,
+    reimburse,
+    unsettled_until,
+)
 
 
 class SettlementInput(BaseModel):
@@ -49,11 +56,6 @@ class SettlementInput(BaseModel):
 class ShareView(BaseModel):
     partner: str
     share: Decimal
-    amount_usd: Decimal
-
-
-class Reimbursement(BaseModel):
-    partner: str
     amount_usd: Decimal
 
 
@@ -126,6 +128,8 @@ async def _closable_boxes(session: AsyncSession, day: date) -> list[tuple[Box, B
 
 async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
     day = data.day or today()
+    if day > today():
+        raise DomainError(f"La fecha del cierre, {day:%d/%m/%Y}, es futura.")
     members = await partners.active_partners(session)
     if not members:
         raise DomainError("No hay socios registrados para repartir.")
@@ -159,11 +163,7 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
     distributed = max(net, Decimal("0.00"))
     amounts = rules.split_shares(distributed, [p.share for p in members])
     rate = await rates.rate_for(session, day)
-    reimbursements: dict[str, Decimal] = {}
-    for expense in expenses:
-        if expense.paid_by_partner and expense.reimbursed_on is None:
-            name = expense.paid_by_partner.name
-            reimbursements[name] = reimbursements.get(name, Decimal(0)) + expense.amount_usd
+    reimbursements = by_partner(e for e in expenses if e.owed)
     next_box_money = sum((p.next_box_cost_usd for p in profits), Decimal("0.00"))
     settlement = Settlement(
         day=day,
@@ -180,7 +180,7 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
     planned = funds.settlement_postings(
         settlement,
         distributed=sum(amounts, Decimal("0.00")),
-        reimbursed=sum(reimbursements.values(), Decimal("0.00")),
+        reimbursed=sum((r.amount_usd for r in reimbursements), Decimal("0.00")),
     )
     after = await funds.balances(session, funds.Cutoff(day), planned)
     preview = SettlementPreview(
@@ -202,7 +202,7 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         rate_stale=rate.stale,
         amount_bs=settlement.amount_bs,
         next_box_money_usd=next_box_money,
-        reimbursements=[Reimbursement(partner=k, amount_usd=v) for k, v in reimbursements.items()],
+        reimbursements=reimbursements,
         petty_cash_after_usd=after.petty_cash_usd,
         capital_after_usd=after.capital_usd,
         savings_after_usd=after.savings_usd,
@@ -243,9 +243,10 @@ async def execute_settlement(session: AsyncSession, data: SettlementInput) -> Se
         box.settlement_id = settlement.id
     for expense in plan.expenses:
         expense.settlement_id = settlement.id
-        if expense.paid_by_partner_id is not None and expense.reimbursed_on is None:
-            expense.reimbursed_on = preview.day
     await session.flush()
+    await reimburse(
+        session, [e.id for e in plan.expenses if e.owed], preview.day, by_settlement=True
+    )
     return SettlementView(id=settlement.id, **preview.model_dump())
 
 
@@ -302,11 +303,7 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
         rate_stale=False,
         amount_bs=settlement.amount_bs,
         next_box_money_usd=settlement.next_box_money_usd,
-        reimbursements=[
-            Reimbursement(partner=e.paid_by_partner.name, amount_usd=e.amount_usd)
-            for e in expenses
-            if e.paid_by_partner
-        ],
+        reimbursements=by_partner(e for e in expenses if e.reimbursed_by_settlement),
         petty_cash_after_usd=after.petty_cash_usd,
         capital_after_usd=after.capital_usd,
         savings_after_usd=after.savings_usd,

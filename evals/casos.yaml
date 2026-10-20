@@ -374,6 +374,18 @@
   estado:
     gastos_devueltos: [2]
 
+- id: devolver_todo_a_un_socio
+  categoria: gastos
+  fixture: semana_parte9_domingo
+  descripcion: Todo lo que se le debe a un socio se devuelve de una vez.
+  turnos:
+    - socio: ya me devolvieron todo lo que puse de mi bolsillo
+      llamadas:
+        - herramienta: marcar_gasto_devuelto
+          args: {socio: yo}
+  estado:
+    gastos_devueltos: [2]
+
 # --- Merma -----------------------------------------------------------------------------
 
 - id: rotos_se_partieron

@@ -341,12 +341,29 @@ async def _adjust_prices(session: AsyncSession, p: PreciosInput, _: ToolContext)
 
 
 class DevolucionInput(ToolInput):
-    gasto_id: int = Field(ge=1, description="El id del gasto, de consultar gastos_pendientes")
+    gasto_id: int = Field(
+        default=0, ge=0, description="El id del gasto, de consultar gastos_pendientes; 0 con socio"
+    )
+    socio: str = Field(
+        default="",
+        description="Para devolverle todo lo que se le debe: yo o el nombre del socio; vacío con "
+        "gasto_id",
+    )
     fecha: date = _day()
 
+    @model_validator(mode="after")
+    def one_target(self) -> Self:
+        if (self.gasto_id == 0) == (self.socio.strip() == ""):
+            raise ValueError("indique gasto_id o socio, uno de los dos")
+        return self
 
-async def _mark_reimbursed(session: AsyncSession, p: DevolucionInput, _: ToolContext) -> Any:
-    return await expenses.mark_reimbursed(session, p.gasto_id, expenses.ReimburseInput(day=p.fecha))
+
+async def _reimburse(session: AsyncSession, p: DevolucionInput, ctx: ToolContext) -> Any:
+    if p.socio.strip():
+        return await expenses.reimburse_partner(
+            session, await partner_name(session, p.socio, ctx), p.fecha
+        )
+    return await expenses.reimburse(session, [p.gasto_id], p.fecha)
 
 
 def amount_or_fraction(text: str) -> tuple[Decimal | None, Decimal | None]:
@@ -599,11 +616,16 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "marcar_gasto_devuelto",
-        "Marca como devuelto a un socio un gasto que pagó de su bolsillo, cuando se lo "
-        "devolvieron antes del cierre. El cierre ya los devuelve solo; no hace falta después.",
+        "Anota que la caja chica le devolvió a un socio un gasto que pagó de su bolsillo, "
+        "antes del cierre. Con gasto_id devuelve ese gasto completo; con socio devuelve de una "
+        "vez todo lo que se le debe a ese socio ('devuélvele todo a Daniel'). No se aceptan "
+        "partes de un gasto, fechas futuras, fechas antes del gasto o del último cierre, ni un "
+        "gasto ya devuelto. El cierre devuelve solo lo que quede pendiente; no hace falta "
+        "después.",
         DevolucionInput,
-        _mark_reimbursed,
+        _reimburse,
         ToolKind.WRITE,
+        ({"gasto_id": 2}, {"socio": "Daniel"}),
     ),
     Tool(
         "preparar_cierre",

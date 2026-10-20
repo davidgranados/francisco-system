@@ -13,7 +13,8 @@ primero la más vieja. Cada caja tiene sus precios, sacados de su costo. Las cue
 dólares; los bolívares son el equivalente con la tasa BCV del día de cada operación. La ganancia \
 de una caja solo existe cuando se acabó y ya se compró la siguiente: antes de eso, lo vendido es \
 dinero de la próxima caja y no se reparte. Los rotos no se cobran. Si un socio pagó un gasto de \
-su bolsillo, se le devuelve en el cierre. Los aportes de un socio no son ganancia.
+su bolsillo, se le devuelve completo en el cierre o antes con marcar_gasto_devuelto, un gasto o \
+todo lo que se le debe de una vez. Los aportes de un socio no son ganancia.
 
 El dinero está en tres fondos. El capital compra las cajas: crece con los aportes de los socios \
 y en cada cierre recibe el costo de reponer las cajas cerradas y la reinversión. Una compra \

@@ -1,15 +1,17 @@
+from collections.abc import Iterable, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import today
+from app.db import lock_inventory
 from app.domain import rules
 from app.domain.errors import DomainError
-from app.models import Expense
+from app.models import Expense, Settlement
 from app.services import partners, rates
 
 
@@ -33,10 +35,6 @@ class ExpenseInput(BaseModel):
         if (self.amount_usd is None) == (self.amount_bs is None):
             raise ValueError("indique el monto en $ o en Bs, uno de los dos")
         return self
-
-
-class ReimburseInput(BaseModel):
-    day: date | None = Field(default=None, description="Fecha de la devolución; por defecto hoy")
 
 
 class ExpenseView(BaseModel):
@@ -89,19 +87,84 @@ async def record_expense(session: AsyncSession, data: ExpenseInput) -> ExpenseVi
     return expense_view(expense)
 
 
-async def mark_reimbursed(
-    session: AsyncSession, expense_id: int, data: ReimburseInput
-) -> ExpenseView:
-    expense = await session.get(Expense, expense_id)
+class Reimbursement(BaseModel):
+    partner: str
+    amount_usd: Decimal
+
+
+def by_partner(expenses: Iterable[Expense]) -> list[Reimbursement]:
+    """What these partner-paid expenses add up to per partner, in first-seen order."""
+    owed: dict[str, Decimal] = {}
+    for expense in expenses:
+        assert expense.paid_by_partner is not None
+        name = expense.paid_by_partner.name
+        owed[name] = owed.get(name, Decimal("0.00")) + expense.amount_usd
+    return [Reimbursement(partner=name, amount_usd=amount) for name, amount in owed.items()]
+
+
+def _refusal(expense: Expense | None, expense_id: int, day: date) -> str | None:
     if expense is None:
-        raise DomainError(f"No existe el gasto {expense_id}.")
+        return f"No existe el gasto {expense_id}."
     if expense.paid_by_partner_id is None:
-        raise DomainError("Ese gasto lo pagó el negocio: no hay nada que devolver.")
+        return "Ese gasto lo pagó el negocio: no hay nada que devolver."
     if expense.reimbursed_on is not None:
-        raise DomainError(f"Ese gasto ya se devolvió el {expense.reimbursed_on:%d/%m/%Y}.")
-    expense.reimbursed_on = data.day or today()
+        return f"Ese gasto ya se devolvió el {expense.reimbursed_on:%d/%m/%Y}."
+    if day < expense.day:
+        return (
+            f"No se puede devolver el {day:%d/%m/%Y} un gasto del {expense.day:%d/%m/%Y}: "
+            "la devolución no puede ser antes del gasto."
+        )
+    return None
+
+
+async def reimburse(
+    session: AsyncSession, expense_ids: Sequence[int], day: date, *, by_settlement: bool = False
+) -> list[ExpenseView]:
+    """Record that the caja chica paid these expenses back to their partners on `day`.
+
+    All or nothing; only a cierre passes `by_settlement`, for the expenses it closes.
+    """
+    await lock_inventory(session)
+    if day > today():
+        raise DomainError(f"La fecha {day:%d/%m/%Y} es futura.")
+    if not by_settlement:
+        last = await session.scalar(select(func.max(Settlement.day)))
+        if last is not None and day < last:
+            raise DomainError(
+                f"No se puede anotar una devolución del {day:%d/%m/%Y}: ya hay un cierre del "
+                f"{last:%d/%m/%Y}. Use esa fecha o una posterior."
+            )
+    found = {
+        expense.id: expense
+        for expense in await session.scalars(select(Expense).where(Expense.id.in_(expense_ids)))
+    }
+    seen: set[int] = set()
+    for expense_id in expense_ids:
+        refusal = _refusal(found.get(expense_id), expense_id, day)
+        if expense_id in seen:
+            refusal = f"El gasto {expense_id} está dos veces: un gasto se devuelve una sola vez."
+        if refusal is not None:
+            raise DomainError(refusal)
+        seen.add(expense_id)
+    for expense in found.values():
+        expense.reimbursed_on = day
+        expense.reimbursed_by_settlement = by_settlement
     await session.flush()
-    return expense_view(expense)
+    return [expense_view(found[expense_id]) for expense_id in expense_ids]
+
+
+async def reimburse_partner(session: AsyncSession, partner: str, day: date) -> list[ExpenseView]:
+    """Give a partner back every expense they paid that is still owed to them."""
+    payer = await partners.find_by_name(session, partner)
+    owed = await session.scalars(
+        select(Expense.id)
+        .where(Expense.paid_by_partner_id == payer.id, Expense.reimbursed_on.is_(None))
+        .order_by(Expense.day, Expense.id)
+    )
+    ids = list(owed)
+    if not ids:
+        raise DomainError(f"No hay gastos pendientes de devolver a {payer.name}.")
+    return await reimburse(session, ids, day)
 
 
 async def unsettled_until(session: AsyncSession, day: date) -> list[Expense]:

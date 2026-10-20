@@ -102,7 +102,7 @@ async def test_sales_fill_the_caja_chica_and_expenses_leave_it_when_the_business
         D("12.10"),
     )
 
-    await call(expenses.mark_reimbursed, paid_by_partner.id, expenses.ReimburseInput(day=DAY))
+    await call(expenses.reimburse, [paid_by_partner.id], DAY)
 
     after = await call(funds.balances)
     assert (after.capital_usd, after.petty_cash_usd, after.savings_usd) == (

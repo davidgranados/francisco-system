@@ -240,10 +240,22 @@ class Expense(CreatedAt, Base):
     paid_by_partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"))
     reimbursed_on: Mapped[date | None]
     settlement_id: Mapped[int | None] = mapped_column(ForeignKey("settlements.id"), index=True)
+    reimbursed_by_settlement: Mapped[bool] = mapped_column(server_default=text("false"))
 
     paid_by_partner: Mapped[Partner | None] = relationship(lazy="joined")
 
-    __table_args__ = (CheckConstraint("amount_usd > 0", name="amount_positive"),)
+    __table_args__ = (
+        CheckConstraint("amount_usd > 0", name="amount_positive"),
+        CheckConstraint(
+            "NOT reimbursed_by_settlement OR (settlement_id IS NOT NULL "
+            "AND reimbursed_on IS NOT NULL AND paid_by_partner_id IS NOT NULL)",
+            name="reimbursed_by_settlement",
+        ),
+    )
+
+    @property
+    def owed(self) -> bool:
+        return self.paid_by_partner_id is not None and self.reimbursed_on is None
 
 
 class Contribution(CreatedAt, Base):

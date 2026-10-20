@@ -108,7 +108,7 @@ def _leg(day: Any, fund: Fund, amount: Any, kind: Kind, settlement_id: Any = Non
 
 
 def _journal() -> Subquery:
-    reimbursed_by = case((Settlement.day == Expense.reimbursed_on, Settlement.id), else_=0)
+    reimbursed_by = case((Expense.reimbursed_by_settlement, Expense.settlement_id), else_=0)
     legs = [
         _leg(Contribution.day, Fund.CAPITAL, Contribution.amount_usd, Kind.CONTRIBUTION),
         _leg(Purchase.day, Fund.CAPITAL, -Purchase.total_usd, Kind.PURCHASE).where(
@@ -124,9 +124,7 @@ def _journal() -> Subquery:
             -Expense.amount_usd,
             Kind.REIMBURSEMENT,
             reimbursed_by,
-        )
-        .outerjoin(Settlement, Expense.settlement_id == Settlement.id)
-        .where(Expense.reimbursed_on.is_not(None)),
+        ).where(Expense.reimbursed_on.is_not(None)),
         _leg(
             Settlement.day,
             Fund.PETTY_CASH,

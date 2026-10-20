@@ -51,7 +51,7 @@ finished ──(entra en un cierre)──▶ settled
 - `sales`: fecha, tasa, cajas completas, cartones, medios, unidades, monto USD, monto Bs, forma de pago, cliente opcional, nota, anulada (bool + motivo). Una venta nunca se borra, se anula.
 - `egg_movements`: el libro del inventario. box_id, fecha, tipo (`sale` | `broken` | `shrinkage` | `gift`), huevos (>0), monto USD (solo ventas), sale_id o count_id. Una venta que cruza dos cajas genera un movimiento por caja; el monto se reparte por huevos y el resto del redondeo va al último movimiento.
 - `inventory_counts`: fecha, huevos esperados, huevos contados, diferencia. La diferencia negativa genera un movimiento `shrinkage` en la caja abierta.
-- `expenses`: fecha, concepto, monto USD, tasa, monto Bs, pagado por (negocio o socio_id), devuelto_en (fecha o null), settlement_id.
+- `expenses`: fecha, concepto, monto USD, tasa, monto Bs, pagado por (negocio o socio_id), devuelto_en (fecha o null), settlement_id y si lo devolvió su cierre (`reimbursed_by_settlement`).
 - `contributions` (aportes): socio, fecha, monto USD, nota. Llenan el capital y nunca se mezclan con la ganancia.
 - `settlements` (cierres): fecha, ganancia de cajas, gastos, reserva, reinversión, ganancia neta, tasa, monto Bs, dinero para la próxima caja, nota. `settlement_shares`: socio, porcentaje, monto.
 - `conversation_messages`: chat_id, rol, contenido JSON, fecha. Historial del agente; se mandan los últimos 30.
@@ -86,7 +86,7 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 6. **Gastos del cierre** (amb. 11). Un cierre toma todos los gastos sin cierre con fecha hasta la del cierre, sin importar a qué caja se refieran.
 7. **Reserva y reinversión** (amb. 12). Las dos son opcionales y se pasan al cierre en USD o en porcentaje; el porcentaje es sobre (ganancia de cajas − gastos). La reserva va a la caja de ahorros y la reinversión al capital. Juntas no pueden pasar de esa ganancia: el cierre se rechaza.
 8. **Cierre sin cajas** (amb. 11). Se permite: ganancia de cajas 0, resta los gastos y la ganancia neta puede salir negativa. Una ganancia neta negativa no se reparte: el cierre queda registrado con partes en 0 y los gastos quedan cubiertos por la caja chica.
-9. **Devolución al socio** (Parte 7). Un gasto pagado por un socio queda pendiente de devolución. El cierre lo marca devuelto en su fecha.
+9. **Devolución al socio** (Parte 7). Un gasto pagado por un socio queda pendiente de devolución. Se devuelve completo, nunca una parte: a mano antes del cierre (`expenses.reimburse`, uno o varios gastos, o todo lo que se le debe a un socio con `reimburse_partner`) o en el cierre, que devuelve los que sigan pendientes en su fecha y lo deja anotado en el gasto. Solo `expenses.reimburse` escribe la devolución, bajo el candado del inventario, y la rechaza sin guardar nada si el gasto no existe, lo pagó el negocio, ya se devolvió, la fecha es futura, es anterior al gasto o es anterior al día del último cierre. El gasto baja la ganancia del cierre aunque se haya devuelto antes: quién adelantó el dinero es una cuestión de caja, no de ganancia. Un cierre con fecha futura se rechaza.
 10. **Merma de conteo** (amb. 16). Se carga a la caja abierta (o a la más vieja con huevos) como `shrinkage`.
 11. **Costo promedio** (amb. 15). Se calcula sobre las cajas con huevos: valor de cada caja = costo × huevos restantes ÷ 360. Promedio por caja = valor total ÷ (huevos totales ÷ 360). Es solo informativo.
 12. **Costos unitarios** (amb. 17). Se guardan sin redondear y se muestran con 4 decimales.
@@ -102,7 +102,7 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 - `purchases`: registrar compra (crea cajas con precios), anular compra si ninguna caja se tocó.
 - `sales`: registrar venta (cajas, cartones, medios, unidades, forma de pago, fecha opcional, monto cobrado opcional para descuentos), reparte en cajas PEPS, rechaza si no hay huevos. Anular venta.
 - `inventory`: registrar rotos o regalados, conteo físico, existencias (huevos, cajas, por caja), costo promedio.
-- `expenses`: registrar gasto (en $ o en Bs; los Bs se pasan a $ con la tasa del día), marcar devuelto, listar pendientes.
+- `expenses`: registrar gasto (en $ o en Bs; los Bs se pasan a $ con la tasa del día), devolver gastos a un socio (uno, varios o todos los suyos), listar pendientes.
 - `pricing`: lista de precios del día en USD y Bs (Plantilla A), ajustar precios de una caja.
 - `boxes`: hoja de una caja (Plantilla C) y su ganancia (Plantilla G).
 - `settlements`: vista previa del cierre (Plantilla H) y ejecutar el cierre.
@@ -132,7 +132,7 @@ El modelo elige herramientas y llena campos; toda cuenta la hace el código. Las
 
 pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho, el bucle y los botones sin red.
 
-El eval del producto está en `evals/`: 60 casos en `casos.yaml` que arrancan de fixtures construidos con los servicios, se corren contra la API real con `uv run python -m evals.run` y se califican sin modelo (llamadas, estado de la base, palabras de la respuesta). `--golden` y `tests/test_evals.py` corren todos los casos con un cliente guionado: prueban el programa y que el estado esperado de cada caso sale de sus llamadas esperadas.
+El eval del producto está en `evals/`: 61 casos en `casos.yaml` que arrancan de fixtures construidos con los servicios, se corren contra la API real con `uv run python -m evals.run` y se califican sin modelo (llamadas, estado de la base, palabras de la respuesta). `--golden` y `tests/test_evals.py` corren todos los casos con un cliente guionado: prueban el programa y que el estado esperado de cada caso sale de sus llamadas esperadas.
 
 ## Decisiones de implementación
 

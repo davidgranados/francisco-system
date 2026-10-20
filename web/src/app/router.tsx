@@ -8,6 +8,7 @@ import {
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import { z } from 'zod'
 import { requireSession, signOutIfUnauthorized } from '@/app/session'
 import { AppShell } from '@/components/AppShell'
@@ -94,19 +95,13 @@ const salesRoute = createRoute({
   component: SalesScreen,
 })
 
-const purchasesRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/compras',
-  validateSearch: pageSearch,
-  component: PurchasesScreen,
-})
+function listRoute<Path extends string>(path: Path, component: () => ReactNode) {
+  return createRoute({ getParentRoute: () => appRoute, path, validateSearch: pageSearch, component })
+}
 
-const expensesRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/gastos',
-  validateSearch: pageSearch,
-  component: ExpensesScreen,
-})
+const purchasesRoute = listRoute('/compras', PurchasesScreen)
+
+const expensesRoute = listRoute('/gastos', ExpensesScreen)
 
 const pendingExpensesRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -114,33 +109,13 @@ const pendingExpensesRoute = createRoute({
   component: PendingExpensesScreen,
 })
 
-const contributionsRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/aportes',
-  validateSearch: pageSearch,
-  component: ContributionsScreen,
-})
+const contributionsRoute = listRoute('/aportes', ContributionsScreen)
 
-const transfersRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/movimientos',
-  validateSearch: pageSearch,
-  component: TransfersScreen,
-})
+const transfersRoute = listRoute('/movimientos', TransfersScreen)
 
-const settlementsRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/cierres',
-  validateSearch: pageSearch,
-  component: SettlementsScreen,
-})
+const settlementsRoute = listRoute('/cierres', SettlementsScreen)
 
-const ratesRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/tasas',
-  validateSearch: pageSearch,
-  component: RatesScreen,
-})
+const ratesRoute = listRoute('/tasas', RatesScreen)
 
 const boxesRoute = createRoute({
   getParentRoute: () => appRoute,

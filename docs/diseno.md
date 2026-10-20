@@ -46,17 +46,27 @@ finished ──(entra en un cierre)──▶ settled
 
 - `partners`: nombre, share (Decimal, la suma de activos = 1), telegram_user_id, activo.
 - `exchange_rates`: fecha (única), tasa (Numeric 14,4), fuente (`bcv_api` | `manual`). Si la API falla se usa la última tasa guardada y se dice.
-- `purchases`: fecha, proveedor, cantidad de cajas, costo por caja USD, tasa, total USD, total Bs, forma de pago, quién pagó (negocio o socio), nota.
+- `purchases`: fecha, proveedor, cantidad de cajas, costo por caja USD, tasa, total USD, total Bs, forma de pago, nota. Siempre la paga el capital.
 - `boxes`: número (único, secuencial), purchase_id, costo USD, precios propios (caja, cartón, medio, unidad), status, fechas de apertura y agotamiento, settlement_id.
 - `sales`: fecha, tasa, cajas completas, cartones, medios, unidades, monto USD, monto Bs, forma de pago, cliente opcional, nota, anulada (bool + motivo). Una venta nunca se borra, se anula.
 - `egg_movements`: el libro del inventario. box_id, fecha, tipo (`sale` | `broken` | `shrinkage` | `gift`), huevos (>0), monto USD (solo ventas), sale_id o count_id. Una venta que cruza dos cajas genera un movimiento por caja; el monto se reparte por huevos y el resto del redondeo va al último movimiento.
 - `inventory_counts`: fecha, huevos esperados, huevos contados, diferencia. La diferencia negativa genera un movimiento `shrinkage` en la caja abierta.
 - `expenses`: fecha, concepto, monto USD, tasa, monto Bs, pagado por (negocio o socio_id), devuelto_en (fecha o null), settlement_id.
-- `contributions` (aportes): socio, fecha, monto USD, nota. Nunca se mezclan con la ganancia.
-- `settlements` (cierres): fecha, ganancia de cajas, gastos, reserva, ganancia neta, tasa, monto Bs, dinero para la próxima caja, nota. `settlement_shares`: socio, porcentaje, monto.
+- `contributions` (aportes): socio, fecha, monto USD, nota. Llenan el capital y nunca se mezclan con la ganancia.
+- `settlements` (cierres): fecha, ganancia de cajas, gastos, reserva, reinversión, ganancia neta, tasa, monto Bs, dinero para la próxima caja, nota. `settlement_shares`: socio, porcentaje, monto.
 - `conversation_messages`: chat_id, rol, contenido JSON, fecha. Historial del agente; se mandan los últimos 30.
 - `pending_actions`: un cierre o una anulación que el modelo preparó y espera el botón Confirmar. chat_id, socio, herramienta, argumentos, vista previa, vence_a, resuelta_a y resultado (`confirmed`, `cancelled`, `superseded`, `expired`, `changed`, `failed`).
 - `processed_updates`: update_id de Telegram, para no procesar dos veces un reintento.
+
+### Fondos
+
+El dinero del negocio está en tres fondos. No tienen tabla: `app/services/funds.py` los suma de las filas que ya mueven dinero, así una anulación o una corrección nunca deja un saldo desfasado.
+
+- **Capital**: compra las cajas. Σ aportes − Σ compras no anuladas + Σ cierres (dinero de la próxima caja + reinversión).
+- **Caja chica**: Σ ventas no anuladas − Σ gastos que pagó el negocio − Σ gastos devueltos a socios − Σ cierres (dinero de la próxima caja + reinversión + reserva) − Σ partes repartidas a socios.
+- **Caja de ahorros**: Σ reservas de los cierres.
+
+Las partes repartidas (utilidades) salen del negocio. Un gasto que pagó un socio sale de la caja chica el día que se le devuelve. `funds.balances(session, until)` da los tres saldos al final de un día y cuánto aportó cada socio; `reports.cash_flow` da, por fondo, saldo inicial, entradas, salidas y saldo final de un período.
 
 ### Formas de pago
 
@@ -72,13 +82,15 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 4. **Rotos** (amb. 6). Se registran como movimiento `broken` de la caja abierta y no se cobran. La hoja de la caja muestra "huevos" = vendidos + rotos, y debe dar 360.
 5. **Reparto** (amb. 5). Cada parte se calcula al centavo con medio hacia arriba; si la suma no da exacto, el centavo de diferencia se ajusta en el socio de mayor porcentaje. 9,52 → 5,71 / 3,81.
 6. **Gastos del cierre** (amb. 11). Un cierre toma todos los gastos sin cierre con fecha hasta la del cierre, sin importar a qué caja se refieran.
-7. **Reserva** (amb. 12). Opcional, monto en USD que se pasa al cierre. Si se da en porcentaje, es sobre (ganancia de cajas − gastos).
-8. **Cierre sin cajas** (amb. 11). Se permite: ganancia de cajas 0, resta los gastos y la ganancia neta puede salir negativa. Una ganancia neta negativa no se reparte: el cierre queda registrado con partes en 0 y los gastos quedan cubiertos por el capital.
+7. **Reserva y reinversión** (amb. 12). Las dos son opcionales y se pasan al cierre en USD o en porcentaje; el porcentaje es sobre (ganancia de cajas − gastos). La reserva va a la caja de ahorros y la reinversión al capital. Juntas no pueden pasar de esa ganancia: el cierre se rechaza.
+8. **Cierre sin cajas** (amb. 11). Se permite: ganancia de cajas 0, resta los gastos y la ganancia neta puede salir negativa. Una ganancia neta negativa no se reparte: el cierre queda registrado con partes en 0 y los gastos quedan cubiertos por la caja chica.
 9. **Devolución al socio** (Parte 7). Un gasto pagado por un socio queda pendiente de devolución. El cierre lo marca devuelto en su fecha.
 10. **Merma de conteo** (amb. 16). Se carga a la caja abierta (o a la más vieja con huevos) como `shrinkage`.
 11. **Costo promedio** (amb. 15). Se calcula sobre las cajas con huevos: valor de cada caja = costo × huevos restantes ÷ 360. Promedio por caja = valor total ÷ (huevos totales ÷ 360). Es solo informativo.
 12. **Costos unitarios** (amb. 17). Se guardan sin redondear y se muestran con 4 decimales.
 13. **Tasa del día**. Siempre la del día de la operación. Si no hay, se busca en la API y se guarda. Una operación con fecha pasada usa la tasa guardada de esa fecha o la última anterior.
+14. **Compras desde el capital** (amb. 13). Toda compra la paga el capital; un socio no paga cajas. Si el capital disponible es menor que el total, la compra se rechaza diciendo cuánto falta aportar. La revisión corre bajo el mismo candado del inventario que la compra, así dos compras a la vez no pasan las dos. Las compras que un socio había pagado antes de este cambio se pasaron a aportes suyos en la migración `3e5b9a7c4d12`.
+15. **Destino del dinero en el cierre** (Parte 8). Primero vuelve al capital el costo de reponer las cajas cerradas (el dinero de la próxima caja). Los gastos y devoluciones siguen como antes. De la ganancia que queda salen la reinversión (al capital) y la reserva (a la caja de ahorros); el resto son las utilidades de los socios. La vista previa muestra cómo quedan caja chica, capital y ahorros al final del día del cierre.
 
 ## Servicios
 
@@ -93,7 +105,8 @@ Cada número de este tipo se decidió para que el ejemplo de la Parte 9 dé exac
 - `boxes`: hoja de una caja (Plantilla C) y su ganancia (Plantilla G).
 - `settlements`: vista previa del cierre (Plantilla H) y ejecutar el cierre.
 - `contributions`: registrar aporte, listar.
-- `reports`: resumen de un período (ventas, compras, gastos, ganancia, por forma de pago) y dinero del negocio (entró − salió).
+- `funds`: saldos de capital, caja chica y caja de ahorros, y aportes por socio.
+- `reports`: resumen de un período (ventas, compras, gastos, ganancia, por forma de pago) y el dinero de cada fondo en el período.
 
 ## API REST
 
@@ -107,7 +120,7 @@ El modelo elige herramientas y llena campos; toda cuenta la hace el código. Las
 - **Esquemas planos y strict.** Cada herramienta tiene su modelo de entrada en la frontera, con nombres de campo en español como hablan los socios (cartones, medios, sueltos, pagado_por) y separado de los modelos de los servicios. Todo campo es un escalar o un `enum`: sin `$ref`, sin `anyOf`, sin objetos anidados. El dinero es un string con `pattern` que acepta coma o punto decimal y se convierte a `Decimal` en el código. Los opcionales tienen valor por defecto en vez de `null`. El generador quita `minimum`, `maxLength` y parecidos (strict los rechaza; Pydantic los sigue validando) y se niega a generar algo anidado. Todas van con `strict: true` y las de escritura con `input_examples`. Un test verifica que el conjunto cabe en los límites de strict (20 herramientas, 24 opcionales, 16 uniones).
 - **Valores que resuelve el código.** `forma_pago` y `pagado_por` aceptan `no_dijo`, que el despachador rechaza pidiendo que se pregunte: con strict el modelo siempre llena el campo, y así no tiene que inventar. `yo` en `pagado_por` o `socio` es quien escribe. Cajas, cartones, medios y sueltos van en campos enteros separados y el código los multiplica. Un nombre de herramienta con otra capitalización se acepta; uno desconocido devuelve la lista de nombres.
 - **Confirmación con botones.** `preparar_cierre` y `preparar_anulacion` ejecutan la operación dentro de una transacción que se deshace, guardan argumentos y resultado como acción pendiente y devuelven la vista previa. El bot pone Confirmar y Cancelar (inline keyboard de Telegram, `CallbackQueryHandler`) debajo de la respuesta. Confirmar vuelve a ejecutar el mismo handler, ahora de verdad, solo si: lo toca el socio que la pidió, no se usó antes (se toma con `SELECT ... FOR UPDATE`), no venció (15 minutos), no la reemplazó una vista previa más nueva del mismo chat y el resultado es igual a la vista previa (si cambió algo, se rechaza). Después el modelo recibe una nota "[Botón Confirmar]" con el resultado para contarlo y seguir.
-- **System prompt** (`app/agent/prompt.py`): secciones XML (`negocio`, `como_trabajar`, `confirmaciones`, `como_hablar`, `ejemplos`) con seis ejemplos de frase → llamada, varios con palabras venezolanas. La fecha (también en ISO), el lunes de la semana, la tasa y quién escribe van en el mensaje del usuario, no en el system, para no romper el cache.
+- **System prompt** (`app/agent/prompt.py`): secciones XML (`negocio`, `como_trabajar`, `confirmaciones`, `como_hablar`, `ejemplos`) con siete ejemplos de frase → llamada, varios con palabras venezolanas. La fecha (también en ISO), el lunes de la semana, la tasa y quién escribe van en el mensaje del usuario, no en el system, para no romper el cache.
 - **Thinking y esfuerzo** (`app/agent/options.py`): cada request manda `thinking` y `output_config.effort`. Por defecto *adaptive* con esfuerzo `medium` en Haiku 5.5 y Sonnet 5.5. `ANTHROPIC_EFFORT` y `ANTHROPIC_THINKING` lo cambian; `off` es `disabled` en Haiku y `between_tools` en Sonnet 5.5, y se rechaza al arrancar por encima de `high`. `tool_choice` queda en `auto`.
 - **Bucle**: hasta 10 rondas de tool use; cada resultado vuelve como JSON. Un `DomainError` o datos inválidos vuelven como `is_error`. Un `stop_reason` de `refusal` tiene su propia respuesta.
 - El historial se guarda por chat. Comando `/nuevo` lo borra. Comando `/start` saluda.
@@ -117,7 +130,7 @@ El modelo elige herramientas y llena campos; toda cuenta la hace el código. Las
 
 pytest + pytest-asyncio contra un Postgres real (docker compose, puerto 5432). La prueba principal reproduce la semana completa de la Parte 9 y verifica cada número: ventas por día, 360 huevos, ventas de la caja 1 = 74,42, ganancia 11,42, gastos 1,90, neta 9,52, socios 5,71 y 3,81. Las reglas de redondeo se prueban contra los ejemplos de las Partes 3, 4 y 6. El agente se prueba con un cliente de Anthropic falso que pide herramientas, para verificar el despacho, el bucle y los botones sin red.
 
-El eval del producto está en `evals/`: 58 casos en `casos.yaml` que arrancan de fixtures construidos con los servicios, se corren contra la API real con `uv run python -m evals.run` y se califican sin modelo (llamadas, estado de la base, palabras de la respuesta). `--golden` y `tests/test_evals.py` corren todos los casos con un cliente guionado: prueban el programa y que el estado esperado de cada caso sale de sus llamadas esperadas.
+El eval del producto está en `evals/`: 60 casos en `casos.yaml` que arrancan de fixtures construidos con los servicios, se corren contra la API real con `uv run python -m evals.run` y se califican sin modelo (llamadas, estado de la base, palabras de la respuesta). `--golden` y `tests/test_evals.py` corren todos los casos con un cliente guionado: prueban el programa y que el estado esperado de cada caso sale de sus llamadas esperadas.
 
 ## Decisiones de implementación
 

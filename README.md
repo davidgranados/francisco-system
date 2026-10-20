@@ -9,7 +9,8 @@ El diseño está en `docs/diseno.md`. Las reglas de redondeo y de ganancia son l
 - Cada compra crea cajas numeradas (Caja 1, Caja 2...) con sus precios: costo + 25 %, cartón y medio redondeados hacia arriba a $ 0,05 y la unidad al centavo.
 - Se vende siempre de la caja abierta más vieja. Una venta que agota una caja sigue en la siguiente.
 - La ganancia de una caja aparece cuando se terminó y ya se compró la siguiente: ventas reales menos el costo de la caja siguiente.
-- El cierre suma esas ganancias, resta los gastos pendientes y una reserva opcional, y reparte según el porcentaje de cada socio. Devuelve lo que un socio pagó de su bolsillo.
+- Las compras salen del capital, que crece con los aportes de los socios; si no alcanza, la compra se rechaza diciendo cuánto falta aportar. Las ventas entran a la caja chica.
+- El cierre devuelve al capital el costo de reponer las cajas cerradas, suma sus ganancias, resta los gastos pendientes, una reserva opcional (a la caja de ahorros) y una reinversión opcional (al capital), y reparte el resto según el porcentaje de cada socio. Devuelve lo que un socio pagó de su bolsillo en gastos.
 - Los bolívares salen de la tasa BCV del día (`ve.dolarapi.com`). Si la API no responde se usa la última tasa guardada y se avisa.
 
 ## Correr en local

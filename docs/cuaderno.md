@@ -328,7 +328,7 @@ Cuando entra dinero de las ventas, se usa en este orden. Nunca se reparte primer
 - **Anoten el reparto y firmen los dos** en la Plantilla H. Así se evitan malentendidos.
 - Si un socio pone más dinero para comprar más cajas, se anota aparte como **aporte** y se conversa cómo se le devuelve; no se mezcla con la ganancia.
 
-Lo que el cuaderno dice sobre reinversión y retiros, en resumen: lo que se descuenta antes de repartir es (1) el dinero de la próxima caja, al precio de hoy, que es capital y no se reparte; (2) los gastos, incluida la devolución a un socio que pagó de su bolsillo; (3) una reserva opcional acordada. La reinversión es esa reserva más el capital de la próxima caja. El único retiro que describe es la parte de cada socio en el cierre semanal. Los aportes de un socio se anotan aparte y su devolución se conversa. No hay otra regla escrita sobre retiros (ver Ambigüedades).
+Lo que el cuaderno dice sobre reinversión y retiros, en resumen: lo que se descuenta antes de repartir es (1) el dinero de la próxima caja, al precio de hoy, que es capital y no se reparte; (2) los gastos, incluida la devolución a un socio que pagó de su bolsillo; (3) una reserva opcional acordada. En el cuaderno, la reinversión es esa reserva más el capital de la próxima caja; la app separa la reinversión de la reserva y lleva el dinero en tres fondos (capital, caja chica, caja de ahorros), ver `docs/diseno.md`, "Fondos". El único retiro que describe es la parte de cada socio en el cierre semanal. Los aportes de un socio se anotan aparte y su devolución se conversa. No hay otra regla escrita sobre retiros (ver Ambigüedades).
 
 ---
 
@@ -532,6 +532,8 @@ Recuadro vacío con estas filas:
 - Firma Socio A:
 - Firma Socio B:
 
+> En la app el cierre tiene además una fila de **reinversión** al capital, que se resta junto con la reserva: Ganancia neta = 1 − 2 − 3 − reinversión. La reserva va a la caja de ahorros y el dinero de la próxima caja vuelve al capital.
+
 ### Resumen de columnas por plantilla (A a H)
 
 | Plantilla | Nombre | Campos |
@@ -618,7 +620,7 @@ Cosas que el cuaderno no deja claras o que se contradicen entre páginas. Las cu
 10. **¿Cuándo sube el precio?** La p. 7 y la p. 26 dicen recalcular los precios "apenas compre una caja más cara" o "el mismo día que compra". Pero en la Parte 9 la caja 2 se compró a $ 63 el jueves 15/10, y el jueves y el viernes la caja 1 se siguió vendiendo con los precios viejos (cartón $ 6,25). No queda claro si el precio va con la caja que se está vendiendo (su propio costo, por PEPS) o con la última compra (costo de reposición).
 11. **¿Qué gastos entran en el cierre de una caja?** La semana resta $ 1,90 de gastos a la ganancia de la caja 1. Pero el transporte de $ 1,50 fue "para buscar la caja 2" (p. 23). El cuaderno dice "gastos de la semana" y no dice cómo asignarlos cuando una semana tiene varias cajas cerradas o ninguna.
 12. **La reserva no tiene base ni tiene ejemplo.** La p. 13 dice "por ej. 10 %" sin decir 10 % de qué (¿de la ganancia neta? ¿de las ventas?). El ejemplo de $ 9,52 no resta ninguna reserva. El orden de la p. 13 pone la reserva antes de llegar a la ganancia neta, igual que la Plantilla H (4 = 1 − 2 − 3) y la hoja resumen.
-13. **Los retiros, los aportes y el capital inicial no tienen reglas.** El aporte de un socio "se anota aparte y se conversa cómo se le devuelve". No hay plantilla para aportes, ni reglas para retiros fuera del reparto semanal, ni cómo se registra el capital inicial. Tampoco dice qué pasa con la reserva acumulada.
+13. **Los retiros, los aportes y el capital inicial no tienen reglas.** El aporte de un socio "se anota aparte y se conversa cómo se le devuelve". No hay plantilla para aportes, ni reglas para retiros fuera del reparto semanal, ni cómo se registra el capital inicial. Tampoco dice qué pasa con la reserva acumulada. La app lo resolvió así: las compras salen del capital, que crece con aportes; la reserva se guarda en la caja de ahorros (ver `docs/diseno.md`, "Fondos").
 14. **"Al precio de hoy" y la regla de la próxima caja.** La p. 13, paso 1, separa "lo de la próxima caja (al precio de hoy)". La p. 6 dice que la ganancia solo se calcula cuando la próxima caja ya se compró, o sea, con su precio real. No queda claro si "precio de hoy" es una cotización antes de comprar o el precio ya pagado.
 15. **PEPS y promedio mezclan cajas y huevos.** El promedio ponderado se calcula por caja. Si se vendieron huevos sueltos de una caja abierta, el cuaderno no dice cómo valorar la caja parcial al rehacer el promedio. Los ejemplos de la p. 9 solo usan cajas enteras.
 16. **La merma por conteo no tiene costo definido.** La p. 10 dice anotar como merma la diferencia del conteo semanal. No dice a qué caja se carga si hay más de una, ni si se valora con el costo de la caja (Pérdida por rotos = rotos × costo de un huevo) o se refleja solo en las ventas. "Merma" (p. 3) también incluye huevos "regalados", que no tienen columna propia.

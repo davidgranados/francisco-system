@@ -24,7 +24,7 @@ El diseño está en `docs/diseno.md`. Los redondeos y la ganancia están hechos 
 |---|---|---|---|
 | Dónde corre | Tu máquina | Railway, entorno `staging` | Railway, entorno `production` |
 | Base de datos | Postgres 18 en `docker compose` | Un Postgres propio en Railway | Un Postgres propio en Railway |
-| Bot de Telegram | Apagado, o uno tuyo con un túnel | El bot de pruebas, [`@venta_de_huevos_staging_bot`](https://t.me/venta_de_huevos_staging_bot) | El bot de los socios |
+| Bot de Telegram | Apagado, o uno tuyo con un túnel | El bot de pruebas, [`@venta_de_huevos_staging_bot`](https://t.me/venta_de_huevos_staging_bot) | El bot de los socios, [`@venta_de_huevos_bot`](https://t.me/venta_de_huevos_bot) |
 | Cómo se hace el deploy | `uv run uvicorn ...` | Solo, con cada push a `main` | Solo al publicar un release en GitHub |
 | Quién lo usa | Quien programa | Los socios y los usuarios de desarrollo, para probar | Los socios, con las cuentas de verdad |
 

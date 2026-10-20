@@ -84,11 +84,14 @@ async def _check_returnable(session: AsyncSession, partner: str, amount: Decimal
 async def move_money(session: AsyncSession, data: TransferInput) -> TransferView:
     """Record the move if the fund it takes from stays covered on every day from its date on."""
     await lock_inventory(session)
+    day = data.day or today()
+    if day > today():
+        raise DomainError(f"La fecha del movimiento, {day:%d/%m/%Y}, es futura.")
     partner = await partners.find_by_name(session, data.partner) if data.partner else None
     if partner is not None and data.kind == TransferKind.CONTRIBUTION_RETURN:
         await _check_returnable(session, partner.name, data.amount_usd)
     transfer = FundTransfer(
-        day=data.day or today(),
+        day=day,
         kind=data.kind,
         from_fund=data.from_fund,
         to_fund=data.to_fund,

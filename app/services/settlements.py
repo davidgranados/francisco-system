@@ -280,7 +280,9 @@ async def _stored_view(session: AsyncSession, settlement: Settlement) -> Settlem
     ]
     expenses = list(
         await session.scalars(
-            select(Expense).where(Expense.settlement_id == settlement.id).order_by(Expense.day)
+            select(Expense)
+            .where(Expense.settlement_id == settlement.id)
+            .order_by(Expense.day, Expense.id)
         )
     )
     after = await funds.balances(session, funds.Cutoff(settlement.day, settlement.id))

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.agent import tools
 from app.agent.tools import dispatch, resolve_pending
+from app.config import today
 from app.db import SessionLocal
 from app.domain.errors import DomainError
 from app.domain.types import Fund, PaymentMethod, TransferKind
@@ -258,3 +259,12 @@ async def test_the_database_refuses_a_move_with_an_impossible_shape(
         )
         with pytest.raises(IntegrityError, match="ck_fund_transfers_shape"):
             await session.flush()
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_move_dated_in_the_future_is_refused(call: Call) -> None:
+    await _with_savings(call)
+    tomorrow = today() + timedelta(days=1)
+
+    with pytest.raises(DomainError, match="es futura"):
+        await call(transfers.move_money, _between(Fund.SAVINGS, Fund.CAPITAL, "1.00", tomorrow))

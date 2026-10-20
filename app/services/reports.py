@@ -1,23 +1,16 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain import rules
 from app.domain.errors import DomainError
 from app.domain.types import MovementKind, PaymentMethod
-from app.models import (
-    Contribution,
-    EggMovement,
-    Expense,
-    Purchase,
-    Sale,
-    Settlement,
-    SettlementShare,
-)
+from app.models import EggMovement, Expense, Purchase, Sale, Settlement
+from app.services import funds
+from app.services.funds import between, sum_of
 
 ZERO = Decimal("0.00")
 
@@ -27,18 +20,29 @@ class PeriodInput(BaseModel):
     date_to: date
 
 
-class CashFlow(BaseModel):
-    """Money that entered and left the business; partner pockets are not the business."""
-
-    sales_usd: Decimal
-    contributions_usd: Decimal
-    purchases_usd: Decimal = Field(description="Compras pagadas por el negocio")
-    expenses_usd: Decimal = Field(description="Gastos pagados por el negocio")
-    reimbursements_usd: Decimal = Field(description="Gastos devueltos a socios")
-    distributed_usd: Decimal = Field(description="Repartido a socios en cierres")
+class FundFlow(BaseModel):
+    opening_usd: Decimal
     entered_usd: Decimal
     left_usd: Decimal
-    balance_usd: Decimal
+    closing_usd: Decimal
+
+
+def _fund_flow(opening: Decimal, entered: Decimal, left: Decimal) -> FundFlow:
+    return FundFlow(
+        opening_usd=opening,
+        entered_usd=entered,
+        left_usd=left,
+        closing_usd=opening + entered - left,
+    )
+
+
+class CashFlow(BaseModel):
+    """Money by fund over a period; utilidades and reimbursements leave the business."""
+
+    capital: FundFlow = Field(description="Capital para comprar cajas")
+    petty_cash: FundFlow = Field(description="Caja chica: ventas, gastos y cierres")
+    savings: FundFlow = Field(description="Caja de ahorros: las reservas")
+    movements: funds.Flows
 
 
 class PeriodSummary(BaseModel):
@@ -59,65 +63,22 @@ class PeriodSummary(BaseModel):
     cash: CashFlow
 
 
-def _between(
-    column: Any, date_from: date | None, date_to: date | None
-) -> list[ColumnElement[bool]]:
-    conditions: list[ColumnElement[bool]] = []
-    if date_from is not None:
-        conditions.append(column >= date_from)
-    if date_to is not None:
-        conditions.append(column <= date_to)
-    return conditions
-
-
-async def _sum(session: AsyncSession, column: Any, *conditions: ColumnElement[bool]) -> Decimal:
-    return await session.scalar(select(func.coalesce(func.sum(column), ZERO)).where(*conditions))
-
-
 async def cash_flow(
     session: AsyncSession, date_from: date | None = None, date_to: date | None = None
 ) -> CashFlow:
-    sales = await _sum(
-        session, Sale.amount_usd, ~Sale.voided, *_between(Sale.day, date_from, date_to)
+    before = (
+        await funds.flows(session, until=date_from - timedelta(days=1))
+        if date_from is not None
+        else funds.Flows.none()
     )
-    contributions = await _sum(
-        session, Contribution.amount_usd, *_between(Contribution.day, date_from, date_to)
-    )
-    purchases = await _sum(
-        session,
-        Purchase.total_usd,
-        ~Purchase.voided,
-        *_between(Purchase.day, date_from, date_to),
-    )
-    expenses = await _sum(
-        session,
-        Expense.amount_usd,
-        Expense.paid_by_partner_id.is_(None),
-        *_between(Expense.day, date_from, date_to),
-    )
-    reimbursements = await _sum(
-        session,
-        Expense.amount_usd,
-        Expense.reimbursed_on.is_not(None),
-        *_between(Expense.reimbursed_on, date_from, date_to),
-    )
-    distributed = await session.scalar(
-        select(func.coalesce(func.sum(SettlementShare.amount_usd), ZERO))
-        .join(Settlement, SettlementShare.settlement_id == Settlement.id)
-        .where(*_between(Settlement.day, date_from, date_to))
-    )
-    entered = sales + contributions
-    left = purchases + expenses + reimbursements + distributed
+    moved = await funds.flows(session, date_from, date_to)
     return CashFlow(
-        sales_usd=sales,
-        contributions_usd=contributions,
-        purchases_usd=purchases,
-        expenses_usd=expenses,
-        reimbursements_usd=reimbursements,
-        distributed_usd=distributed,
-        entered_usd=entered,
-        left_usd=left,
-        balance_usd=entered - left,
+        capital=_fund_flow(before.capital_usd, moved.capital_in_usd, moved.capital_out_usd),
+        petty_cash=_fund_flow(
+            before.petty_cash_usd, moved.petty_cash_in_usd, moved.petty_cash_out_usd
+        ),
+        savings=_fund_flow(before.reserved_usd, moved.reserved_usd, ZERO),
+        movements=moved,
     )
 
 
@@ -126,7 +87,7 @@ async def summary(session: AsyncSession, data: PeriodInput) -> PeriodSummary:
         raise DomainError("La fecha final es anterior a la inicial.")
     period = (data.date_from, data.date_to)
     sales = list(
-        await session.scalars(select(Sale).where(~Sale.voided, *_between(Sale.day, *period)))
+        await session.scalars(select(Sale).where(~Sale.voided, *between(Sale.day, *period)))
     )
     by_method: dict[PaymentMethod, Decimal] = {}
     for sale in sales:
@@ -135,14 +96,14 @@ async def summary(session: AsyncSession, data: PeriodInput) -> PeriodSummary:
         (
             await session.execute(
                 select(EggMovement.kind, func.sum(EggMovement.eggs))
-                .where(EggMovement.kind != MovementKind.SALE, *_between(EggMovement.day, *period))
+                .where(EggMovement.kind != MovementKind.SALE, *between(EggMovement.day, *period))
                 .group_by(EggMovement.kind)
             )
         ).all()
     )
     purchases = list(
         await session.scalars(
-            select(Purchase).where(~Purchase.voided, *_between(Purchase.day, *period))
+            select(Purchase).where(~Purchase.voided, *between(Purchase.day, *period))
         )
     )
     return PeriodSummary(
@@ -158,9 +119,9 @@ async def summary(session: AsyncSession, data: PeriodInput) -> PeriodSummary:
         shrinkage_eggs=int(losses.get(MovementKind.SHRINKAGE, 0)),
         boxes_bought=sum(p.box_count for p in purchases),
         purchases_usd=sum((p.total_usd for p in purchases), ZERO),
-        expenses_usd=await _sum(session, Expense.amount_usd, *_between(Expense.day, *period)),
-        settlements_net_usd=await _sum(
-            session, Settlement.net_profit_usd, *_between(Settlement.day, *period)
+        expenses_usd=await sum_of(session, Expense.amount_usd, *between(Expense.day, *period)),
+        settlements_net_usd=await sum_of(
+            session, Settlement.net_profit_usd, *between(Settlement.day, *period)
         ),
         cash=await cash_flow(session, *period),
     )

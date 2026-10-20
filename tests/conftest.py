@@ -1,6 +1,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -28,7 +29,7 @@ from sqlalchemy.engine import make_url  # noqa: E402
 from alembic import command  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
 from app.models import Base  # noqa: E402
-from app.services import partners, rates  # noqa: E402
+from app.services import contributions, partners, rates  # noqa: E402
 
 Call = Callable[..., Awaitable[Any]]
 
@@ -92,4 +93,15 @@ async def two_partners(call: Call) -> None:
             partners.PartnerEntry(name="Socio A", share=Decimal("0.60"), telegram_user_id=111),
             partners.PartnerEntry(name="Socio B", share=Decimal("0.40"), telegram_user_id=222),
         ],
+    )
+
+
+@pytest.fixture
+async def capital(call: Call, two_partners: None) -> None:
+    """Enough capital that purchases are never refused for money."""
+    await call(
+        contributions.record_contribution,
+        contributions.ContributionInput(
+            partner="Socio A", amount_usd=Decimal("10000.00"), day=date(2026, 1, 1)
+        ),
     )

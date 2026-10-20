@@ -13,7 +13,15 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.types import PaymentMethod
-from app.services import expenses, inventory, partners, purchases, rates, sales
+from app.services import (
+    contributions,
+    expenses,
+    inventory,
+    partners,
+    purchases,
+    rates,
+    sales,
+)
 
 PARTNERS = {"Francisco": 111, "Daniel": 222}
 SHARES = {"Francisco": D("0.60"), "Daniel": D("0.40")}
@@ -89,8 +97,18 @@ async def _expense(factory: Factory, day: date, concept: str, usd: str, paid_by:
 
 
 async def _week_until(factory: Factory, today: date) -> None:
-    """Part 9 up to the start of `today`: everything dated earlier, plus Monday's bags."""
+    """Part 9 up to the start of `today`: everything dated earlier, plus Monday's bags.
+
+    Francisco puts $ 200 of capital in first, enough for both boxes of the week.
+    """
     await _partners_and_rates(factory, today)
+    await _call(
+        factory,
+        contributions.record_contribution,
+        contributions.ContributionInput(
+            partner="Francisco", amount_usd=D("200.00"), day=date(2026, 10, 11)
+        ),
+    )
     await _buy(factory, date(2026, 10, 11), "60.00")
     await _expense(factory, MONDAY, "Bolsas plásticas", "0.40", None)
     if today > MONDAY:

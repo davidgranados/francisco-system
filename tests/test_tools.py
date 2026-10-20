@@ -82,7 +82,7 @@ def test_a_nested_or_nullable_field_is_refused_by_the_schema_builder() -> None:
 
 
 @pytest.fixture
-async def stocked(call: Call) -> None:
+async def stocked(call: Call, capital: None) -> None:
     await call(rates.set_rate, rates.SetRateInput(day=today(), rate=D("880.00")))
     await call(
         purchases.register_purchase,
@@ -117,7 +117,7 @@ async def test_a_sale_charged_in_bolivares_takes_a_comma_decimal(call: Call) -> 
     assert (sale.amount_bs, sale.amount_usd, sale.eggs) == (D("17176.51"), D("19.52"), 94)
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_yo_pays_as_the_partner_who_writes(call: Call) -> None:
     outcome = await _run(
         "registrar_gasto",
@@ -128,7 +128,7 @@ async def test_yo_pays_as_the_partner_who_writes(call: Call) -> None:
     assert (expense.paid_by_partner, expense.amount_usd) == ("Socio A", D("1.50"))
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_an_unknown_payer_writes_nothing(call: Call) -> None:
     gasto = {"concepto": "Bolsas", "moneda": "usd", "monto": "0.40"}
     for payer, message in (("no_dijo", "Falta saber quién pagó"), ("Pedro", "No conozco")):
@@ -155,7 +155,7 @@ async def test_a_tool_name_in_the_wrong_case_still_runs() -> None:
     assert "registrar_venta" in unknown.content
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_preparing_a_void_changes_nothing_until_confirmed(call: Call) -> None:
     await _run("registrar_venta", {**SALE, "forma_pago": "punto"})
     [sale] = await call(sales.list_sales)
@@ -171,14 +171,14 @@ async def test_preparing_a_void_changes_nothing_until_confirmed(call: Call) -> N
     assert [s.voided for s in await call(sales.list_sales)] == [True]
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_a_preview_that_fails_creates_no_pending_action() -> None:
     outcome = await _run("preparar_anulacion", {"que": "compra", "id": 99, "motivo": "error"})
     assert (outcome.is_error, outcome.pending_id) == (True, None)
     assert "No existe la compra 99" in outcome.content
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_yo_from_a_developer_asks_for_the_partner_and_writes_nothing(call: Call) -> None:
     expense = {"concepto": "Transporte", "moneda": "usd", "monto": "1,50", "pagado_por": "yo"}
     contribution = {"socio": "yo", "monto_usd": "10"}
@@ -190,7 +190,7 @@ async def test_yo_from_a_developer_asks_for_the_partner_and_writes_nothing(call:
     assert await call(expenses.pending) == []
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_a_developer_can_name_the_partner_who_paid(call: Call) -> None:
     outcome = await dispatch(
         "registrar_gasto",
@@ -203,7 +203,7 @@ async def test_a_developer_can_name_the_partner_who_paid(call: Call) -> None:
     assert expense.paid_by_partner == "Socio B"
 
 
-@pytest.mark.usefixtures("two_partners", "stocked")
+@pytest.mark.usefixtures("stocked")
 async def test_a_developer_can_prepare_and_confirm_a_void_and_a_partner_cannot(call: Call) -> None:
     await dispatch("registrar_venta", {**SALE, "forma_pago": "punto"}, SessionLocal, DEV)
     [sale] = await call(sales.list_sales)

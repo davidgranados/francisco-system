@@ -12,7 +12,7 @@ from app.domain import rules
 from app.domain.errors import DomainError
 from app.domain.types import BoxStatus, PaymentMethod
 from app.models import Box, Purchase
-from app.services import rates
+from app.services import funds, rates
 from app.services.boxes import BoxView, views_of
 from app.services.ledger import boxes_with_eggs
 
@@ -98,9 +98,17 @@ async def register_purchase(session: AsyncSession, data: PurchaseInput) -> Regis
     await lock_inventory(session)
     day = data.day or today()
     rate = await rates.rate_for(session, day)
+    total_usd = data.cost_per_box_usd * data.box_count
+    capital = (await funds.balances(session)).capital_usd
+    if capital < total_usd:
+        raise DomainError(
+            f"El capital disponible es {rules.format_usd(capital)} y la compra cuesta "
+            f"{rules.format_usd(total_usd)}. Falta un aporte de "
+            f"{rules.format_usd(total_usd - capital)}: regístrelo con registrar_aporte y vuelva "
+            "a registrar la compra."
+        )
     holdings = await boxes_with_eggs(session)
     selling = holdings[0][0] if holdings else None
-    total_usd = data.cost_per_box_usd * data.box_count
     purchase = Purchase(
         day=day,
         supplier=data.supplier,

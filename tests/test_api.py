@@ -28,6 +28,7 @@ async def test_api_rejects_missing_or_bad_keys(
     assert response.status_code == 401
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_purchase_and_a_sale_through_the_api(client: httpx.AsyncClient) -> None:
     assert (
         await client.put("/api/v1/rates", json={"day": "2026-10-12", "rate": "876.80"}, headers=KEY)

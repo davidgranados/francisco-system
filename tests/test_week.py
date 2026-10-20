@@ -94,7 +94,7 @@ async def _live_the_week(call: Call) -> dict[str, object]:
     return seen
 
 
-@pytest.mark.usefixtures("two_partners")
+@pytest.mark.usefixtures("capital")
 async def test_part9_week_reproduces_every_number(call: Call) -> None:
     seen = await _live_the_week(call)
 

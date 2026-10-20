@@ -58,6 +58,7 @@ async def _sell(
     )
 
 
+@pytest.mark.usefixtures("capital")
 async def test_plantilla_a_price_list_of_the_day(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -72,6 +73,7 @@ async def test_plantilla_a_price_list_of_the_day(call: Call) -> None:
     ]
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_sale_crossing_two_boxes_splits_eggs_and_money(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -102,6 +104,7 @@ async def test_a_sale_crossing_two_boxes_splits_eggs_and_money(call: Call) -> No
     assert first.rows[-1].amount_bs == before.amount_bs + crossing.amount_bs - D("184.36")
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_count_with_missing_eggs_records_shrinkage_on_the_open_box(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00", count=2)
@@ -117,6 +120,7 @@ async def test_a_count_with_missing_eggs_records_shrinkage_on_the_open_box(call:
     assert (ledger[0].other_losses, ledger[0].counted, ledger[0].difference) == (6, 620, -6)
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_count_with_extra_eggs_changes_nothing_and_warns(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -149,7 +153,7 @@ async def test_settlement_with_no_boxes_covers_expenses_and_shares_nothing(call:
     assert await call(expenses.pending) == []
 
 
-@pytest.mark.usefixtures("two_partners")
+@pytest.mark.usefixtures("capital")
 async def test_settlement_reserve_as_percent_comes_off_before_the_split(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -167,6 +171,7 @@ async def test_settlement_reserve_as_percent_comes_off_before_the_split(call: Ca
     assert [s.amount_usd for s in preview.shares] == [D("6.48"), D("4.32")]
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_box_without_its_next_box_has_no_profit_yet(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -176,6 +181,7 @@ async def test_a_box_without_its_next_box_has_no_profit_yet(call: Call) -> None:
     assert (await call(boxes.box_sheet, 1)).profit is None
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_sale_needs_eggs(call: Call) -> None:
     await _rate(call)
     with pytest.raises(DomainError, match="No hay huevos"):
@@ -196,6 +202,7 @@ async def test_an_expense_paid_in_bolivares_is_converted_at_the_day_rate(call: C
         expenses.ExpenseInput(concept="Bolsas")
 
 
+@pytest.mark.usefixtures("capital")
 async def test_a_whole_box_sale_uses_the_box_price_and_empties_the_box(call: Call) -> None:
     await _rate(call)
     await _buy(call, "63.00")
@@ -210,6 +217,7 @@ async def test_a_whole_box_sale_uses_the_box_price_and_empties_the_box(call: Cal
     assert ([row.boxes for row in sheet.rows], sheet.total_eggs) == ([1], 360)
 
 
+@pytest.mark.usefixtures("capital")
 async def test_part6_payment_in_bolivares_is_converted_at_the_day_rate(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -221,6 +229,7 @@ async def test_part6_payment_in_bolivares_is_converted_at_the_day_rate(call: Cal
     )
 
 
+@pytest.mark.usefixtures("capital")
 async def test_voiding_a_sale_gives_the_eggs_back(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -238,6 +247,7 @@ async def test_voiding_a_sale_gives_the_eggs_back(call: Call) -> None:
         await call(sales.void_sale, sale.id, purchases.VoidInput(reason="otra vez"))
 
 
+@pytest.mark.usefixtures("capital")
 async def test_voiding_refuses_to_leave_two_open_boxes(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -249,7 +259,7 @@ async def test_voiding_refuses_to_leave_two_open_boxes(call: Call) -> None:
     assert (await call(inventory.stock)).total_eggs == 330
 
 
-@pytest.mark.usefixtures("two_partners")
+@pytest.mark.usefixtures("capital")
 async def test_a_settled_sale_cannot_be_voided(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -260,6 +270,7 @@ async def test_a_settled_sale_cannot_be_voided(call: Call) -> None:
         await call(sales.void_sale, sale.id, purchases.VoidInput(reason="error"))
 
 
+@pytest.mark.usefixtures("capital")
 async def test_voiding_an_untouched_purchase_renumbers_later_boxes(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -276,6 +287,7 @@ async def test_voiding_an_untouched_purchase_renumbers_later_boxes(call: Call) -
         await call(purchases.void_purchase, first.id, purchases.VoidInput(reason="x"))
 
 
+@pytest.mark.usefixtures("capital")
 async def test_adjusting_prices_of_the_open_box_from_the_new_cost(call: Call) -> None:
     await _rate(call)
     await _buy(call, "60.00")
@@ -358,8 +370,11 @@ async def test_contributions_stay_out_of_profit_and_count_as_money_in(call: Call
         D("60.00"),
     )
     assert summary.sales_by_payment_method == {PaymentMethod.CASH_USD: D("12.50")}
-    assert (summary.cash.entered_usd, summary.cash.left_usd, summary.cash.balance_usd) == (
-        D("112.50"),
+    assert (summary.cash.capital.entered_usd, summary.cash.capital.left_usd) == (
+        D("100.00"),
         D("60.00"),
-        D("52.50"),
+    )
+    assert (summary.cash.capital.closing_usd, summary.cash.petty_cash.closing_usd) == (
+        D("40.00"),
+        D("12.50"),
     )

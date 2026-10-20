@@ -80,6 +80,7 @@ async def _history(chat_id: int) -> list[dict[str, Any]]:
         return await loop.load_history(session, chat_id)
 
 
+@pytest.mark.usefixtures("capital")
 async def test_the_loop_runs_a_tool_and_returns_the_final_text(call: Call) -> None:
     await call(
         purchases.register_purchase,

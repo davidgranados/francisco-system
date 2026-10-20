@@ -14,6 +14,7 @@ from app.domain.errors import DomainError
 from app.domain.types import Fund
 from app.models import Expense, Settlement
 from app.services import funds, partners, rates
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class ExpenseInput(BaseModel):
@@ -48,6 +49,10 @@ class ExpenseView(BaseModel):
     paid_by_partner: str | None
     reimbursed_on: date | None
     settled: bool
+
+
+class OwedExpenses(Page[ExpenseView]):
+    owed_usd: Decimal = Field(description="Lo que se les debe a los socios en todas las páginas")
 
 
 def expense_view(expense: Expense) -> ExpenseView:
@@ -186,6 +191,12 @@ async def unsettled_until(session: AsyncSession, day: date) -> list[Expense]:
     return list(rows)
 
 
+async def expenses_page(session: AsyncSession, request: PageRequest) -> Page[ExpenseView]:
+    query = select(Expense).order_by(Expense.day.desc(), Expense.id.desc())
+    rows, total = await fetch_page(session, query, request)
+    return Page[ExpenseView].of([expense_view(expense) for expense in rows], total, request)
+
+
 async def pending(session: AsyncSession) -> list[ExpenseView]:
     """Expenses not yet in a settlement, and partner-paid ones not yet given back."""
     rows = await session.scalars(
@@ -199,3 +210,20 @@ async def pending(session: AsyncSession) -> list[ExpenseView]:
         .order_by(Expense.day, Expense.id)
     )
     return [expense_view(expense) for expense in rows]
+
+
+async def owed_page(session: AsyncSession, request: PageRequest) -> OwedExpenses:
+    """Partner-paid expenses not yet given back, oldest first, and what they add up to."""
+    owed = Expense.paid_by_partner_id.is_not(None) & Expense.reimbursed_on.is_(None)
+    query = select(Expense).where(owed).order_by(Expense.day, Expense.id)
+    rows, total = await fetch_page(session, query, request)
+    owed_usd = await session.scalar(
+        select(func.coalesce(func.sum(Expense.amount_usd), Decimal("0.00"))).where(owed)
+    )
+    return OwedExpenses(
+        items=[expense_view(expense) for expense in rows],
+        total=total,
+        page=request.page,
+        page_size=request.page_size,
+        owed_usd=owed_usd,
+    )

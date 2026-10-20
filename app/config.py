@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from functools import cached_property
+from pathlib import Path
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,8 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.agent.options import Effort, Thinking, request_options
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
@@ -30,6 +33,7 @@ class Settings(BaseSettings):
     markup: Decimal = Decimal("0.25")
     timezone: str = "America/Caracas"
     bcv_api_url: str = "https://ve.dolarapi.com/v1/dolares/oficial"
+    web_dist: Path = REPO_ROOT / "web" / "dist"
 
     @field_validator(
         "telegram_bot_token",

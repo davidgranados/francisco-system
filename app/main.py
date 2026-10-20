@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI, Request
@@ -9,10 +10,12 @@ from sqlalchemy import text
 
 from app.agent import telegram
 from app.agent.loop import Agent
+from app.api import auth
 from app.api.v1 import router as v1_router
 from app.config import settings
 from app.db import SessionLocal, engine
 from app.domain.errors import DomainError
+from app.web import serve_web
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 # httpx logs request URLs at INFO, and Telegram URLs carry the bot token.
@@ -60,20 +63,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await engine.dispose()
 
 
-app = FastAPI(
-    title="Francisco System", description="Cuentas del negocio de huevos.", lifespan=lifespan
-)
-app.include_router(v1_router)
-app.include_router(telegram.router)
-
-
-@app.exception_handler(DomainError)
 async def domain_error(_: Request, error: DomainError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": error.message})
 
 
-@app.get("/healthz", include_in_schema=False)
 async def healthz() -> dict[str, str]:
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+def create_app(web_dist: Path) -> FastAPI:
+    """The API, plus the SPA in `web_dist` when that directory exists."""
+    app = FastAPI(
+        title="Francisco System", description="Cuentas del negocio de huevos.", lifespan=lifespan
+    )
+    app.include_router(auth.router)
+    app.include_router(v1_router)
+    app.include_router(telegram.router)
+    app.add_exception_handler(DomainError, domain_error)
+    app.add_api_route("/healthz", healthz, include_in_schema=False)
+    if web_dist.is_dir():
+        serve_web(app, web_dist)
+    return app
+
+
+app = create_app(settings.web_dist)

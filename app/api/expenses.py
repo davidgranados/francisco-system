@@ -3,10 +3,11 @@ from datetime import date
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.config import today
 from app.services import expenses
 from app.services.expenses import ExpenseInput, ExpenseView
+from app.services.pages import Page
 
 router = APIRouter(prefix="/expenses", tags=["gastos"])
 
@@ -15,9 +16,19 @@ class ReimburseInput(BaseModel):
     day: date | None = Field(default=None, description="Fecha de la devolución; por defecto hoy")
 
 
+@router.get("")
+async def list_expenses(session: Session, paging: Paging) -> Page[ExpenseView]:
+    return await expenses.expenses_page(session, paging)
+
+
 @router.get("/pending")
 async def pending(session: Session) -> list[ExpenseView]:
     return await expenses.pending(session)
+
+
+@router.get("/owed")
+async def owed(session: Session, paging: Paging) -> expenses.OwedExpenses:
+    return await expenses.owed_page(session, paging)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

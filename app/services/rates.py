@@ -13,6 +13,7 @@ from app.domain.errors import DomainError
 from app.domain.rules import FOUR_PLACES, format_number
 from app.domain.types import RateSource
 from app.models import ExchangeRate
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class RateUnavailable(Exception):
@@ -99,6 +100,20 @@ async def set_rate(session: AsyncSession, data: SetRateInput) -> RateView:
     )
     assert row is not None
     return _view(row, day)
+
+
+class ExchangeRateRow(BaseModel):
+    day: date
+    rate: Decimal
+    source: RateSource
+
+
+async def rates_page(session: AsyncSession, request: PageRequest) -> Page[ExchangeRateRow]:
+    """The rates stored, newest day first."""
+    query = select(ExchangeRate).order_by(ExchangeRate.day.desc())
+    rows, total = await fetch_page(session, query, request)
+    items = [ExchangeRateRow(day=r.day, rate=r.rate, source=r.source) for r in rows]
+    return Page[ExchangeRateRow].of(items, total, request)
 
 
 def describe(rate: RateView) -> str:

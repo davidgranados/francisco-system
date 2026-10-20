@@ -1,15 +1,16 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.services import contributions
 from app.services.contributions import ContributionInput, ContributionView
+from app.services.pages import Page
 
 router = APIRouter(prefix="/contributions", tags=["aportes"])
 
 
 @router.get("")
-async def list_contributions(session: Session) -> list[ContributionView]:
-    return await contributions.list_contributions(session)
+async def list_contributions(session: Session, paging: Paging) -> Page[ContributionView]:
+    return await contributions.contributions_page(session, paging)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

@@ -15,6 +15,7 @@ from app.domain.types import BoxStatus, MovementKind, PaymentMethod
 from app.models import Sale
 from app.services import rates
 from app.services.ledger import boxes_with_eggs, release_movements, take_eggs
+from app.services.pages import Page, PageRequest, fetch_page
 from app.services.purchases import VoidInput
 
 
@@ -186,3 +187,16 @@ async def list_sales(session: AsyncSession, day: date | None = None) -> list[Sal
         .order_by(Sale.id)
     )
     return [_view(sale) for sale in rows]
+
+
+async def sales_page(
+    session: AsyncSession, request: PageRequest, day: date | None = None
+) -> Page[SaleView]:
+    """Every sale newest first, or only those of `day`."""
+    query = (
+        select(Sale).options(selectinload(Sale.movements)).order_by(Sale.day.desc(), Sale.id.desc())
+    )
+    if day is not None:
+        query = query.where(Sale.day == day)
+    rows, total = await fetch_page(session, query, request)
+    return Page[SaleView].of([_view(sale) for sale in rows], total, request)

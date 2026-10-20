@@ -1,15 +1,16 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.services import settlements
+from app.services.pages import Page
 from app.services.settlements import SettlementInput, SettlementPreview, SettlementView
 
 router = APIRouter(prefix="/settlements", tags=["cierres"])
 
 
 @router.get("")
-async def list_settlements(session: Session, limit: int = 10) -> list[SettlementView]:
-    return await settlements.list_settlements(session, limit)
+async def list_settlements(session: Session, paging: Paging) -> Page[SettlementView]:
+    return await settlements.settlements_page(session, paging)
 
 
 @router.post("/preview")

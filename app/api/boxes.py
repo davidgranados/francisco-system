@@ -1,15 +1,18 @@
 from fastapi import APIRouter
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.services import boxes
 from app.services.boxes import BoxProfit, BoxSheet, BoxView
+from app.services.pages import Page
 
 router = APIRouter(prefix="/boxes", tags=["cajas"])
 
 
 @router.get("")
-async def list_boxes(session: Session, include_settled: bool = False) -> list[BoxView]:
-    return await boxes.list_boxes(session, include_settled)
+async def list_boxes(
+    session: Session, paging: Paging, include_settled: bool = False
+) -> Page[BoxView]:
+    return await boxes.boxes_page(session, paging, include_settled)
 
 
 @router.get("/{number}/sheet")

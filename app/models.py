@@ -349,3 +349,25 @@ class PendingAction(CreatedAt, Base):
     expires_at: Mapped[datetime]
     resolved_at: Mapped[datetime | None]
     outcome: Mapped[str | None] = mapped_column(String(20))
+
+
+class LoginCode(Base):
+    """The one live web login code of a person; only its SHA-256 is kept."""
+
+    __tablename__ = "login_codes"
+
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    sent_at: Mapped[datetime]
+    expires_at: Mapped[datetime]
+    tries: Mapped[int] = mapped_column(server_default=text("0"))
+
+
+class WebSession(CreatedAt, Base):
+    """A browser logged in to the web ledger; only the SHA-256 of its cookie is kept."""
+
+    __tablename__ = "web_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    expires_at: Mapped[datetime]

@@ -99,14 +99,11 @@ async def register_purchase(session: AsyncSession, data: PurchaseInput) -> Regis
     day = data.day or today()
     rate = await rates.rate_for(session, day)
     total_usd = data.cost_per_box_usd * data.box_count
-    capital, _ = await funds.lowest_balance(session, Fund.CAPITAL, since=day)
-    if capital < total_usd:
-        raise DomainError(
-            f"El capital disponible es {rules.format_usd(capital)} y la compra cuesta "
-            f"{rules.format_usd(total_usd)}. Falta un aporte de "
-            f"{rules.format_usd(total_usd - capital)}: regístrelo con registrar_aporte y vuelva "
-            "a registrar la compra."
-        )
+    await funds.ensure_covered(
+        session,
+        funds.Operation.PURCHASE,
+        [funds.Posting(day, Fund.CAPITAL, -total_usd, funds.Kind.PURCHASE)],
+    )
     holdings = await boxes_with_eggs(session)
     selling = holdings[0][0] if holdings else None
     purchase = Purchase(

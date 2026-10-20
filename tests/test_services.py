@@ -130,9 +130,11 @@ async def test_a_count_with_extra_eggs_changes_nothing_and_warns(call: Call) -> 
     assert (await call(inventory.stock)).total_eggs == 360
 
 
-@pytest.mark.usefixtures("two_partners")
+@pytest.mark.usefixtures("capital")
 async def test_settlement_with_no_boxes_covers_expenses_and_shares_nothing(call: Call) -> None:
     await _rate(call)
+    await _buy(call, "60.00")
+    await _sell(call, cartons=1)
     await call(
         expenses.record_expense,
         expenses.ExpenseInput(

@@ -97,6 +97,10 @@ async def test_a_reimbursement_dated_before_the_last_cierre_is_refused(call: Cal
     earlier = DAY - timedelta(days=2)
     await call(rates.set_rate, rates.SetRateInput(day=earlier, rate=D("876.80")))
     await call(settlements.execute_settlement, settlements.SettlementInput(day=DAY))
+    await call(
+        sales.record_sale,
+        sales.SaleInput(day=DAY, cartons=1, payment_method=PaymentMethod.CASH_USD),
+    )
     expense = await _paid_by(call, "Socio B", "1.50", day=earlier)
 
     with pytest.raises(DomainError, match="ya hay un cierre del 14/10/2026"):

@@ -11,8 +11,9 @@ from app.config import today
 from app.db import lock_inventory
 from app.domain import rules
 from app.domain.errors import DomainError
+from app.domain.types import Fund
 from app.models import Expense, Settlement
-from app.services import partners, rates
+from app.services import funds, partners, rates
 
 
 class ExpenseInput(BaseModel):
@@ -146,6 +147,15 @@ async def reimburse(
         if refusal is not None:
             raise DomainError(refusal)
         seen.add(expense_id)
+    if not by_settlement:
+        await funds.ensure_covered(
+            session,
+            funds.Operation.REIMBURSEMENT,
+            [
+                funds.Posting(day, Fund.PETTY_CASH, -e.amount_usd, funds.Kind.REIMBURSEMENT)
+                for e in found.values()
+            ],
+        )
     for expense in found.values():
         expense.reimbursed_on = day
         expense.reimbursed_by_settlement = by_settlement

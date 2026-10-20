@@ -1,5 +1,6 @@
 """Capital, caja chica and caja de ahorros, seen through the services that move money."""
 
+import asyncio
 from datetime import date
 from decimal import Decimal as D
 
@@ -319,3 +320,119 @@ async def test_the_report_counts_as_gastos_only_what_left_the_caja_chica(call: C
     await call(settlements.execute_settlement, settlements.SettlementInput(day=DAY))
     paid = await call(reports.summary, period)
     assert (paid.expenses_usd, paid.pending_reimbursement_usd) == (D("1.90"), D("0.00"))
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_backdated_purchase_names_the_day_the_capital_would_go_negative(
+    call: Call,
+) -> None:
+    await _contribute(call, "Socio A", "100.00", day=date(2026, 10, 13))
+    await call(
+        purchases.register_purchase,
+        purchases.PurchaseInput(
+            day=date(2026, 10, 15),
+            box_count=1,
+            cost_per_box_usd=D("100.00"),
+            payment_method=PaymentMethod.CASH_USD,
+        ),
+    )
+
+    with pytest.raises(DomainError) as refused:
+        await call(purchases.register_purchase, _purchase(1, "50.00"))
+    assert refused.value.message.endswith(
+        "Con esa fecha, el capital quedaría en negativo el 15/10/2026."
+    )
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_two_purchases_at_once_cannot_both_spend_the_same_capital(call: Call) -> None:
+    await _contribute(call, "Socio A", "100.00")
+
+    outcomes = await asyncio.gather(
+        call(purchases.register_purchase, _purchase(1)),
+        call(purchases.register_purchase, _purchase(1)),
+        return_exceptions=True,
+    )
+
+    assert sorted(type(o).__name__ for o in outcomes) == ["DomainError", "RegisteredPurchase"]
+    assert (await call(funds.balances)).capital_usd == D("40.00")
+
+
+async def _discounted_week(call: Call) -> settlements.SettlementInput:
+    """Box 1 sold at a discount for $ 61,00, with $ 3,00 of bags: the caja chica holds $ 58,00."""
+    await _contribute(call, "Socio A", "120.00")
+    await call(purchases.register_purchase, _purchase(2))
+    await call(
+        sales.record_sale,
+        sales.SaleInput(
+            day=DAY, boxes=1, charged_usd=D("61.00"), payment_method=PaymentMethod.CASH_USD
+        ),
+    )
+    await call(
+        expenses.record_expense,
+        expenses.ExpenseInput(day=DAY, concept="Bolsas", amount_usd=D("3.00")),
+    )
+    return settlements.SettlementInput(day=DAY)
+
+
+CIERRE_SHORT = (
+    "La caja chica tiene $ 58,00 y el cierre necesita sacar $ 60,00 (capital devuelto, "
+    "reinversión, reserva, utilidades y devoluciones). Faltan $ 2,00: revise que estén "
+    "registradas todas las ventas, o baje la reinversión y la reserva."
+)
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_cierre_the_caja_chica_cannot_cover_is_refused_in_preview_and_execution(
+    call: Call,
+) -> None:
+    closing = await _discounted_week(call)
+
+    with pytest.raises(DomainError) as previewed:
+        await call(settlements.preview_settlement, closing)
+    with pytest.raises(DomainError) as executed:
+        await call(settlements.execute_settlement, closing)
+
+    assert previewed.value.message == executed.value.message == CIERRE_SHORT
+    assert await call(settlements.list_settlements) == []
+    assert (await call(funds.balances)).petty_cash_usd == D("58.00")
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_a_reimbursement_the_caja_chica_cannot_cover_is_refused(call: Call) -> None:
+    await _discounted_week(call)
+    owed = await call(
+        expenses.record_expense,
+        expenses.ExpenseInput(
+            day=DAY, concept="Transporte", amount_usd=D("60.00"), paid_by_partner="Socio B"
+        ),
+    )
+
+    with pytest.raises(DomainError) as refused:
+        await call(expenses.reimburse, [owed.id], DAY)
+
+    assert refused.value.message.startswith(
+        "La caja chica tiene $ 58,00 y la devolución es de $ 60,00. Faltan $ 2,00"
+    )
+    assert (await call(funds.balances)).petty_cash_usd == D("58.00")
+
+
+@pytest.mark.usefixtures("two_partners")
+async def test_an_expense_or_a_voided_sale_may_leave_the_caja_chica_negative(
+    call: Call,
+) -> None:
+    await _contribute(call, "Socio A", "60.00")
+    await call(purchases.register_purchase, _purchase(1))
+    sale = await call(
+        sales.record_sale,
+        sales.SaleInput(day=DAY, cartons=2, payment_method=PaymentMethod.CASH_USD),
+    )
+    await call(
+        expenses.record_expense,
+        expenses.ExpenseInput(day=DAY, concept="Bolsas", amount_usd=D("13.00")),
+    )
+    assert (await call(funds.balances)).petty_cash_usd == D("-0.50")
+
+    await call(sales.void_sale, sale.id, purchases.VoidInput(reason="no se cobró"))
+
+    assert (await call(funds.balances)).petty_cash_usd == D("-13.00")

@@ -182,6 +182,7 @@ async def _plan(session: AsyncSession, data: SettlementInput) -> _Plan:
         distributed=sum(amounts, Decimal("0.00")),
         reimbursed=sum((r.amount_usd for r in reimbursements), Decimal("0.00")),
     )
+    await funds.ensure_covered(session, funds.Operation.SETTLEMENT, planned)
     after = await funds.balances(session, funds.Cutoff(day), planned)
     preview = SettlementPreview(
         day=day,

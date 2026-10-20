@@ -6,7 +6,7 @@ the cierre. The caja de ahorros keeps the reserves. Nothing stores a balance, so
 correction never leaves one out of date.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -29,6 +29,9 @@ from sqlalchemy import (
 from sqlalchemy import tuple_ as row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import lock_inventory
+from app.domain import rules
+from app.domain.errors import DomainError
 from app.domain.types import Fund
 from app.models import Contribution, Expense, Partner, Purchase, Sale, Settlement, SettlementShare
 
@@ -265,3 +268,92 @@ async def lowest_balance(
             lowest = (balance, day)
     assert lowest is not None
     return lowest
+
+
+class Operation(StrEnum):
+    """A write that may not leave the funds it takes from below zero on any later day.
+
+    An expense and a voided sale are facts that already happened, so they never ask.
+    """
+
+    PURCHASE = "purchase"
+    REIMBURSEMENT = "reimbursement"
+    SETTLEMENT = "settlement"
+    TRANSFER = "transfer"
+
+
+FUND_NAMES = {
+    Fund.CAPITAL: "el capital",
+    Fund.PETTY_CASH: "la caja chica",
+    Fund.SAVINGS: "la caja de ahorros",
+}
+
+
+@dataclass(frozen=True)
+class Shortfall:
+    fund: Fund
+    since: date
+    needed: Decimal
+    missing: Decimal
+    lowest_day: date
+
+    @property
+    def available(self) -> Decimal:
+        return self.needed - self.missing
+
+
+def _usd(amount: Decimal) -> str:
+    return rules.format_usd(amount)
+
+
+REFUSALS: dict[Operation, Callable[[Shortfall], str]] = {
+    Operation.PURCHASE: lambda s: (
+        f"El capital disponible es {_usd(s.available)} y la compra cuesta {_usd(s.needed)}. "
+        f"Falta un aporte de {_usd(s.missing)}: regístrelo con registrar_aporte y vuelva a "
+        "registrar la compra."
+    ),
+    Operation.REIMBURSEMENT: lambda s: (
+        f"La caja chica tiene {_usd(s.available)} y la devolución es de {_usd(s.needed)}. "
+        f"Faltan {_usd(s.missing)}: devuélvalo cuando entren más ventas o déjelo para el "
+        "próximo cierre."
+    ),
+    Operation.SETTLEMENT: lambda s: (
+        f"La caja chica tiene {_usd(s.available)} y el cierre necesita sacar {_usd(s.needed)} "
+        "(capital devuelto, reinversión, reserva, utilidades y devoluciones). Faltan "
+        f"{_usd(s.missing)}: revise que estén registradas todas las ventas, o baje la "
+        "reinversión y la reserva."
+    ),
+    Operation.TRANSFER: lambda s: (
+        f"{FUND_NAMES[s.fund].capitalize()} tiene {_usd(s.available)} y el movimiento es de "
+        f"{_usd(s.needed)}. Faltan {_usd(s.missing)}."
+    ),
+}
+
+
+async def ensure_covered(
+    session: AsyncSession, operation: Operation, plan: Sequence[Posting]
+) -> None:
+    """Refuse when `plan` leaves a fund it takes from negative at the end of any day from then on.
+
+    Takes the inventory lock, so the caller's write lands before anyone else reads the funds.
+    """
+    await lock_inventory(session)
+    for fund in Fund:
+        taken = [p for p in plan if p.fund == fund and p.amount_usd < 0]
+        if not taken:
+            continue
+        since = min(p.day for p in taken)
+        lowest, day = await lowest_balance(session, fund, since, plan)
+        if lowest >= 0:
+            continue
+        shortfall = Shortfall(
+            fund=fund,
+            since=since,
+            needed=-sum((p.amount_usd for p in taken), ZERO),
+            missing=-lowest,
+            lowest_day=day,
+        )
+        message = REFUSALS[operation](shortfall)
+        if day != since:
+            message += f" Con esa fecha, {FUND_NAMES[fund]} quedaría en negativo el {day:%d/%m/%Y}."
+        raise DomainError(message)

@@ -20,8 +20,9 @@ El dinero está en tres fondos. El capital compra las cajas: crece con los aport
 y en cada cierre recibe el costo de reponer las cajas cerradas y la reinversión. Una compra \
 nunca la paga un socio: si el capital no alcanza no se registra; si un socio puso la plata, es \
 un aporte y después la compra. La caja chica recibe las ventas y paga los gastos, las \
-devoluciones y el cierre. La caja de ahorros guarda la reserva. Las utilidades del cierre son \
-de los socios y salen del negocio.
+devoluciones y el cierre; puede quedar en negativo por un gasto o una venta anulada, pero una \
+devolución o un cierre que no alcanza no se registra. La caja de ahorros guarda la reserva. \
+Las utilidades del cierre son de los socios y salen del negocio.
 </negocio>
 
 <como_trabajar>
@@ -45,6 +46,8 @@ cierre.
 Si una herramienta devuelve un error, explícalo con tus palabras y di qué puede hacer el socio. \
 Si una compra se rechaza porque el capital no alcanza, di cuánto hay, cuánto cuesta y cuánto \
 falta, y ofrece registrar el aporte de un socio; con el aporte registrado, registra la compra. \
+Si un cierre o una devolución se rechaza porque la caja chica no alcanza, di cuánto hay y cuánto \
+falta. \
 Si una compra trae price_notice, avísale que la caja nueva es más cara y ofrécele subir los \
 precios con ajustar_precios. Si la tasa vino de un día anterior (rate_stale), avísalo.
 

@@ -534,10 +534,10 @@ TOOLS: list[Tool] = [
         "Registra la compra de cajas de huevos y crea las cajas numeradas con sus precios. "
         "Úsala cuando el socio dice que compró cajas y a cuánto cada una. Toda compra se paga "
         "con el capital del negocio; si un socio puso el dinero, primero registrar_aporte. Si "
-        "el capital no alcanza, no se guarda y el error dice cuánto falta: explícalo y ofrece "
-        "registrar ese aporte. Si la respuesta trae price_notice, la caja nueva es más cara que "
-        "la que se vende: díselo y ofrece subir los precios con ajustar_precios. No la uses "
-        "para gastos que no son huevos.",
+        "el capital no alcanza (también en cualquier día desde la fecha de la compra), no se "
+        "guarda y el error dice cuánto falta: explícalo y ofrece registrar ese aporte. Si la "
+        "respuesta trae price_notice, la caja nueva es más cara que la que se vende: díselo y "
+        "ofrece subir los precios con ajustar_precios. No la uses para gastos que no son huevos.",
         CompraInput,
         _record_purchase,
         ToolKind.WRITE,
@@ -620,8 +620,8 @@ TOOLS: list[Tool] = [
         "antes del cierre. Con gasto_id devuelve ese gasto completo; con socio devuelve de una "
         "vez todo lo que se le debe a ese socio ('devuélvele todo a Daniel'). No se aceptan "
         "partes de un gasto, fechas futuras, fechas antes del gasto o del último cierre, ni un "
-        "gasto ya devuelto. El cierre devuelve solo lo que quede pendiente; no hace falta "
-        "después.",
+        "gasto ya devuelto. Si la caja chica no alcanza, no se guarda y el error dice cuánto "
+        "hay. El cierre devuelve solo lo que quede pendiente; no hace falta después.",
         DevolucionInput,
         _reimburse,
         ToolKind.WRITE,
@@ -632,7 +632,8 @@ TOOLS: list[Tool] = [
         "Prepara el cierre de la caja chica y el reparto: cajas terminadas con su caja "
         "siguiente comprada, capital devuelto (costo de reponerlas), gastos pendientes, "
         "reserva (a la caja de ahorros), reinversión (al capital), utilidades de cada socio, "
-        "devoluciones y cómo quedan caja chica, capital y ahorros. No guarda nada: devuelve la "
+        "devoluciones y cómo quedan caja chica, capital y ahorros. Si la caja chica no alcanza "
+        "para todo eso, se rechaza y el error dice cuánto falta. No guarda nada: devuelve la "
         "vista previa y el bot le pone al mensaje los botones Confirmar y Cancelar. Úsala "
         "cuando el socio pide el cierre, la repartición o 'cuánto nos toca'. Muestra el "
         "reparto y dile que toque Confirmar; un 'sí' escrito no confirma.",

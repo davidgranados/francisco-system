@@ -2,3 +2,5 @@
 
 - Publishing a GitHub release deploys to production (`.github/workflows/prod-deployment.yml`). Never create, publish or edit a release, or push a `v*` tag, unless a person asked for a production deploy in those words. Pushing to `main` deploys staging only. See `docs/despliegue.md`.
 - Code and identifiers in English; text people read (bot replies, docs, error messages) in Spanish.
+- Rules in `.claude/rules/`: `code-in-english-spanish-only-facing-the-user.md` when naming anything, `code-comments.md` when writing a comment or docstring.
+- `.claude/hooks/block_commands.py` refuses `gh release create` or `edit` and pushing a `v*` tag; `tests/test_command_hooks.py` keeps it refusing.

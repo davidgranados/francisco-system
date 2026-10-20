@@ -134,13 +134,18 @@ async def test_the_bot_gives_a_partner_back_everything_owed_to_them_at_once(call
     owed_to_b = await _paid_by(call, "Socio B", "0.40")
 
     outcome = await dispatch(
-        "marcar_gasto_devuelto", {"socio": "yo", "fecha": DAY.isoformat()}, SessionLocal, SPEAKER
+        "marcar_gasto_devuelto",
+        {"gasto_id": 0, "socio": "yo", "fecha": DAY.isoformat()},
+        SessionLocal,
+        SPEAKER,
     )
 
     assert not outcome.is_error, outcome.content
     owed = [e.id for e in await call(expenses.pending) if e.reimbursed_on is None]
     assert owed == [owed_to_b]
     assert await _petty_cash(call) == D("71.50")
-    again = await dispatch("marcar_gasto_devuelto", {"socio": "Socio A"}, SessionLocal, SPEAKER)
+    again = await dispatch(
+        "marcar_gasto_devuelto", {"gasto_id": 0, "socio": "Socio A"}, SessionLocal, SPEAKER
+    )
     assert again.is_error
     assert "No hay gastos pendientes de devolver a Socio A" in again.content

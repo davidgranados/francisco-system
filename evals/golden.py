@@ -20,6 +20,8 @@ DEFAULT_ARGS: dict[str, dict[str, Any]] = {
     "registrar_gasto": {"pagado_por": "negocio", "moneda": "usd"},
     "preparar_cierre": {"reserva": "0"},
     "preparar_anulacion": {"motivo": "error al anotar"},
+    "marcar_gasto_devuelto": {"gasto_id": 0, "socio": ""},
+    "mover_dinero": {"socio": ""},
 }
 
 

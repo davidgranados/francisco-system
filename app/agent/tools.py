@@ -22,7 +22,7 @@ from app.agent.identity import Actor
 from app.config import today
 from app.domain import rules
 from app.domain.errors import DomainError
-from app.domain.types import PaymentMethod
+from app.domain.types import Fund, PaymentMethod, TransferKind
 from app.services import (
     boxes,
     contributions,
@@ -36,6 +36,7 @@ from app.services import (
     reports,
     sales,
     settlements,
+    transfers,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,6 +292,64 @@ async def _record_contribution(session: AsyncSession, p: AporteInput, ctx: ToolC
     )
 
 
+FondoName = Literal["capital", "caja_chica", "ahorros"]
+FUNDS: dict[str, Fund] = {
+    "capital": Fund.CAPITAL,
+    "caja_chica": Fund.PETTY_CASH,
+    "ahorros": Fund.SAVINGS,
+}
+MOVES: dict[str, TransferKind] = {
+    "traspaso": TransferKind.BETWEEN_FUNDS,
+    "devolver_aporte": TransferKind.CONTRIBUTION_RETURN,
+    "retirar_utilidades": TransferKind.PROFIT_WITHDRAWAL,
+}
+
+
+class MoverDineroInput(ToolInput):
+    que: Literal["traspaso", "devolver_aporte", "retirar_utilidades"]
+    desde: FondoName
+    hacia: Literal["capital", "caja_chica", "ahorros", "socio"] = Field(
+        description="Fondo que recibe; socio si el dinero sale del negocio"
+    )
+    socio: str = Field(default="", description="yo o el nombre; vacío en un traspaso")
+    monto_usd: str = Field(pattern=MONEY, description="Monto en $. " + MONEY_HELP)
+    nota: str = ""
+    fecha: date = _day()
+
+
+async def _move_money(session: AsyncSession, p: MoverDineroInput, ctx: ToolContext) -> Any:
+    kind = MOVES[p.que]
+    if kind == TransferKind.BETWEEN_FUNDS:
+        if p.hacia == "socio":
+            raise DomainError(
+                "Un traspaso pasa dinero de un fondo a otro: hacia es capital, caja_chica o "
+                "ahorros. Si el dinero se lo lleva un socio, es devolver_aporte o "
+                "retirar_utilidades."
+            )
+        if FUNDS[p.hacia] == FUNDS[p.desde]:
+            raise DomainError("El fondo de origen y el de destino son el mismo.")
+    else:
+        if p.hacia != "socio" or not p.socio.strip():
+            raise DomainError(
+                "Una devolución de aporte o un retiro de utilidades sale del negocio hacia un "
+                "socio: hacia es socio y falta decir qué socio."
+            )
+        if kind == TransferKind.CONTRIBUTION_RETURN and p.desde != "capital":
+            raise DomainError("Un aporte se devuelve solo desde el capital.")
+    return await transfers.move_money(
+        session,
+        transfers.TransferInput(
+            kind=kind,
+            from_fund=FUNDS[p.desde],
+            to_fund=None if p.hacia == "socio" else FUNDS[p.hacia],
+            partner=None if p.hacia != "socio" else await partner_name(session, p.socio, ctx),
+            amount_usd=money(p.monto_usd),
+            day=p.fecha,
+            note=p.nota or None,
+        ),
+    )
+
+
 class TasaInput(ToolInput):
     tasa: str = Field(pattern=RATE, description="Bs por dólar, ej. 881,25")
     fecha: date = _day()
@@ -342,12 +401,11 @@ async def _adjust_prices(session: AsyncSession, p: PreciosInput, _: ToolContext)
 
 class DevolucionInput(ToolInput):
     gasto_id: int = Field(
-        default=0, ge=0, description="El id del gasto, de consultar gastos_pendientes; 0 con socio"
+        ge=0, description="El id del gasto, de consultar gastos_pendientes; 0 si va socio"
     )
     socio: str = Field(
-        default="",
-        description="Para devolverle todo lo que se le debe: yo o el nombre del socio; vacío con "
-        "gasto_id",
+        description="Para devolverle todo lo que se le debe: yo o el nombre del socio; vacío si "
+        "va gasto_id"
     )
     fecha: date = _day()
 
@@ -405,16 +463,20 @@ async def _settle(session: AsyncSession, p: CierreInput, _: ToolContext) -> Any:
 
 
 class AnulacionInput(ToolInput):
-    que: Literal["venta", "compra"]
-    id: int = Field(ge=1, description="El id de la venta o la compra, de consultar")
+    que: Literal["venta", "compra", "movimiento_dinero"]
+    id: int = Field(ge=1, description="El id de la venta, la compra o el movimiento, de consultar")
     motivo: str = Field(min_length=1, description="Por qué se anula, en pocas palabras")
 
 
+VOIDS = {
+    "venta": sales.void_sale,
+    "compra": purchases.void_purchase,
+    "movimiento_dinero": transfers.void_transfer,
+}
+
+
 async def _void(session: AsyncSession, p: AnulacionInput, _: ToolContext) -> Any:
-    reason = purchases.VoidInput(reason=p.motivo)
-    if p.que == "venta":
-        return await sales.void_sale(session, p.id, reason)
-    return await purchases.void_purchase(session, p.id, reason)
+    return await VOIDS[p.que](session, p.id, purchases.VoidInput(reason=p.motivo))
 
 
 # --- Reads ----------------------------------------------------------------------------
@@ -431,6 +493,7 @@ Consulta = Literal[
     "cierres",
     "tasa",
     "dinero",
+    "movimientos_dinero",
 ]
 
 QUERIES: dict[str, Callable[[AsyncSession, date], Awaitable[Any]]] = {
@@ -445,6 +508,7 @@ QUERIES: dict[str, Callable[[AsyncSession, date], Awaitable[Any]]] = {
     "cierres": lambda s, _: settlements.list_settlements(s),
     "tasa": rates.rate_for,
     "dinero": lambda s, _: funds.balances(s),
+    "movimientos_dinero": lambda s, _: transfers.list_transfers(s),
 }
 
 
@@ -595,6 +659,31 @@ TOOLS: list[Tool] = [
         ({"socio": "yo", "monto_usd": "100"},),
     ),
     Tool(
+        "mover_dinero",
+        "Prepara un movimiento de dinero que no es compra, venta, gasto, aporte ni cierre. "
+        "que=traspaso pasa dinero entre capital, caja chica y caja de ahorros ('pasa los "
+        "ahorros al capital', 'saca 20 de ahorros para la caja chica'). que=devolver_aporte le "
+        "devuelve a un socio parte de lo que aportó, solo desde el capital y nunca más de lo "
+        "que aportó; hacia es socio. que=retirar_utilidades es un socio que se lleva ganancia "
+        "fuera del cierre; hacia es socio. Si el fondo de origen no alcanza, no se guarda y el "
+        "error dice cuánto hay. No guarda nada todavía: el bot muestra Confirmar y Cancelar; un "
+        "'sí' escrito no confirma. No la uses para aportes nuevos (registrar_aporte) ni para "
+        "devolver un gasto que pagó un socio (marcar_gasto_devuelto).",
+        MoverDineroInput,
+        _move_money,
+        ToolKind.CONFIRM,
+        (
+            {"que": "traspaso", "desde": "ahorros", "hacia": "capital", "monto_usd": "30"},
+            {
+                "que": "devolver_aporte",
+                "desde": "capital",
+                "hacia": "socio",
+                "socio": "yo",
+                "monto_usd": "50",
+            },
+        ),
+    ),
+    Tool(
         "fijar_tasa",
         "Guarda a mano la tasa BCV (Bs por dólar) de un día, cuando el socio la dice o la "
         "corrige. La del día ya viene en el contexto; no la uses para consultarla.",
@@ -625,7 +714,7 @@ TOOLS: list[Tool] = [
         DevolucionInput,
         _reimburse,
         ToolKind.WRITE,
-        ({"gasto_id": 2}, {"socio": "Daniel"}),
+        ({"gasto_id": 2, "socio": ""}, {"gasto_id": 0, "socio": "Daniel"}),
     ),
     Tool(
         "preparar_cierre",
@@ -648,9 +737,11 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "preparar_anulacion",
-        "Prepara la anulación de una venta o una compra registrada por error; la venta anulada "
-        "devuelve sus huevos al inventario. No anula nada todavía: el bot muestra los botones "
-        "Confirmar y Cancelar. Busca antes el id con consultar (ventas o compras). Para "
+        "Prepara la anulación de una venta, una compra o un movimiento de dinero registrado por "
+        "error; la venta anulada devuelve sus huevos al inventario y el movimiento anulado "
+        "devuelve el dinero a su fondo. No anula nada todavía: el bot muestra los botones "
+        "Confirmar y Cancelar. Busca antes el id con consultar (ventas, compras o "
+        "movimientos_dinero). Para "
         "corregir una cantidad, prepara la anulación y registra la venta correcta cuando el "
         "socio confirme.",
         AnulacionInput,
@@ -665,7 +756,8 @@ TOOLS: list[Tool] = [
         "de un día, con su id), compras (las últimas, con su id), gastos_pendientes (sin cierre "
         "o por devolver a un socio, con su id), aportes, socios, cierres, tasa (BCV de un día), "
         "dinero (cuánto hay en el capital, la caja chica y la caja de ahorros, y cuánto aportó "
-        "cada socio).",
+        "cada socio menos lo que se le devolvió), movimientos_dinero (traspasos, devoluciones de "
+        "aporte y retiros de utilidades, con su id).",
         ConsultaInput,
         _query,
         ToolKind.READ,

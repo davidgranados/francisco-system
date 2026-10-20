@@ -40,3 +40,9 @@ class Fund(StrEnum):
     CAPITAL = "capital"
     PETTY_CASH = "petty_cash"
     SAVINGS = "savings"
+
+
+class TransferKind(StrEnum):
+    BETWEEN_FUNDS = "between_funds"
+    CONTRIBUTION_RETURN = "contribution_return"
+    PROFIT_WITHDRAWAL = "profit_withdrawal"

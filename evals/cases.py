@@ -19,6 +19,7 @@ LIST_KEYS = (
     "conteos_nuevos",
     "aportes_nuevos",
     "cierres_nuevos",
+    "movimientos_nuevos",
     "anuladas",
     "gastos_devueltos",
 )

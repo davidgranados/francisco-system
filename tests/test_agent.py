@@ -210,7 +210,7 @@ def test_no_tool_takes_a_confirmation_flag() -> None:
     for definition in tools.tool_definitions():
         assert "confirmado" not in definition["input_schema"]["properties"]
     confirming = {tool.name for tool in tools.TOOLS if tool.kind == tools.ToolKind.CONFIRM}
-    assert confirming == {"preparar_cierre", "preparar_anulacion"}
+    assert confirming == {"preparar_cierre", "preparar_anulacion", "mover_dinero"}
 
 
 async def test_history_carries_over_without_thinking_blocks() -> None:

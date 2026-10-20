@@ -19,6 +19,7 @@ REQUIRED_CATEGORIES = {
     "conteo",
     "tasa",
     "aportes",
+    "movimientos",
     "consultas",
     "cierre",
     "correcciones",

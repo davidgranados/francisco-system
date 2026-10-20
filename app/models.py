@@ -21,7 +21,14 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.domain.types import BoxStatus, MovementKind, PaymentMethod, RateSource
+from app.domain.types import (
+    BoxStatus,
+    Fund,
+    MovementKind,
+    PaymentMethod,
+    RateSource,
+    TransferKind,
+)
 
 Money = Numeric(14, 2)
 Rate = Numeric(14, 4)
@@ -56,7 +63,19 @@ class Base(DeclarativeBase):
         BoxStatus: value_enum(BoxStatus),
         MovementKind: value_enum(MovementKind),
         RateSource: value_enum(RateSource),
+        Fund: value_enum(Fund),
+        TransferKind: value_enum(TransferKind),
     }
+
+
+TRANSFER_SHAPE = (
+    "(kind = 'between_funds' AND to_fund IS NOT NULL AND to_fund <> from_fund "
+    "AND partner_id IS NULL) "
+    "OR (kind = 'contribution_return' AND from_fund = 'capital' AND to_fund IS NULL "
+    "AND partner_id IS NOT NULL) "
+    "OR (kind = 'profit_withdrawal' AND to_fund IS NULL AND partner_id IS NOT NULL)"
+)
+"""Between funds: a destination and no partner. Out to a partner: no destination."""
 
 
 class CreatedAt:
@@ -270,6 +289,35 @@ class Contribution(CreatedAt, Base):
     partner: Mapped[Partner] = relationship(lazy="joined")
 
     __table_args__ = (CheckConstraint("amount_usd > 0", name="amount_positive"),)
+
+
+class FundTransfer(CreatedAt, Base):
+    """Money moved between funds, or out to a partner, that no other row explains."""
+
+    __tablename__ = "fund_transfers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[date] = mapped_column(index=True)
+    kind: Mapped[TransferKind]
+    from_fund: Mapped[Fund]
+    to_fund: Mapped[Fund | None]
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), index=True)
+    amount_usd: Mapped[Decimal]
+    note: Mapped[str | None] = mapped_column(Text)
+    voided: Mapped[bool] = mapped_column(server_default=text("false"))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+
+    partner: Mapped[Partner | None] = relationship(lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("amount_usd > 0", name="amount_positive"),
+        CheckConstraint(TRANSFER_SHAPE, name="shape"),
+        CheckConstraint(
+            "from_fund IN ('capital', 'petty_cash', 'savings') AND "
+            "(to_fund IS NULL OR to_fund IN ('capital', 'petty_cash', 'savings'))",
+            name="funds",
+        ),
+    )
 
 
 class ConversationMessage(CreatedAt, Base):

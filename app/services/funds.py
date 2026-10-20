@@ -32,8 +32,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import lock_inventory
 from app.domain import rules
 from app.domain.errors import DomainError
-from app.domain.types import Fund
-from app.models import Contribution, Expense, Partner, Purchase, Sale, Settlement, SettlementShare
+from app.domain.types import Fund, TransferKind
+from app.models import (
+    Contribution,
+    Expense,
+    FundTransfer,
+    Partner,
+    Purchase,
+    Sale,
+    Settlement,
+    SettlementShare,
+)
 
 ZERO = Decimal("0.00")
 
@@ -50,6 +59,16 @@ class Kind(StrEnum):
     REINVESTMENT = "reinvestment"
     RESERVE = "reserve"
     DISTRIBUTION = "distribution"
+    BETWEEN_FUNDS = "between_funds"
+    CONTRIBUTION_RETURN = "contribution_return"
+    PROFIT_WITHDRAWAL = "profit_withdrawal"
+
+
+TRANSFER_KINDS = {
+    TransferKind.BETWEEN_FUNDS: Kind.BETWEEN_FUNDS,
+    TransferKind.CONTRIBUTION_RETURN: Kind.CONTRIBUTION_RETURN,
+    TransferKind.PROFIT_WITHDRAWAL: Kind.PROFIT_WITHDRAWAL,
+}
 
 
 @dataclass(frozen=True)
@@ -100,10 +119,12 @@ SETTLEMENT_MOVES: tuple[tuple[Kind, str, Fund], ...] = (
 """What a cierre moves out of the caja chica besides utilidades and reimbursements, and where."""
 
 
-def _leg(day: Any, fund: Fund, amount: Any, kind: Kind, settlement_id: Any = None) -> Select[Any]:
+def _leg(
+    day: Any, fund: Fund | Any, amount: Any, kind: Kind, settlement_id: Any = None
+) -> Select[Any]:
     return select(
         day.label("day"),
-        literal(fund.value, String).label("fund"),
+        (literal(fund.value, String) if isinstance(fund, Fund) else fund).label("fund"),
         amount.label("amount_usd"),
         literal(kind.value, String).label("kind"),
         (literal(0, Integer) if settlement_id is None else settlement_id).label("settlement_id"),
@@ -144,7 +165,28 @@ def _journal() -> Subquery:
             _leg(Settlement.day, Fund.PETTY_CASH, -column, kind, Settlement.id).where(column != 0)
         )
         legs.append(_leg(Settlement.day, to, column, kind, Settlement.id).where(column != 0))
+    live = ~FundTransfer.voided
+    for transfer_kind, kind in TRANSFER_KINDS.items():
+        legs.append(
+            _leg(FundTransfer.day, FundTransfer.from_fund, -FundTransfer.amount_usd, kind).where(
+                live, FundTransfer.kind == transfer_kind
+            )
+        )
+    legs.append(
+        _leg(
+            FundTransfer.day, FundTransfer.to_fund, FundTransfer.amount_usd, Kind.BETWEEN_FUNDS
+        ).where(live, FundTransfer.to_fund.is_not(None))
+    )
     return union_all(*legs).subquery("postings")
+
+
+def transfer_postings(transfer: FundTransfer) -> list[Posting]:
+    """The postings a live transfer makes, the same ones `_journal` reads."""
+    kind = TRANSFER_KINDS[transfer.kind]
+    postings = [Posting(transfer.day, transfer.from_fund, -transfer.amount_usd, kind)]
+    if transfer.to_fund is not None:
+        postings.append(Posting(transfer.day, transfer.to_fund, transfer.amount_usd, kind))
+    return postings
 
 
 def settlement_postings(
@@ -181,21 +223,42 @@ async def balances(
         held[Fund(fund)] += amount
     for posting in planned:
         held[posting.fund] += posting.amount_usd
-    by_partner = await session.execute(
-        select(Partner.name, func.sum(Contribution.amount_usd))
-        .join(Partner, Contribution.partner_id == Partner.id)
-        .where(*([] if at is None else [Contribution.day <= at.day]))
-        .group_by(Partner.id, Partner.name)
-        .order_by(Partner.id)
-    )
     return FundBalances(
         capital_usd=held[Fund.CAPITAL],
         petty_cash_usd=held[Fund.PETTY_CASH],
         savings_usd=held[Fund.SAVINGS],
         contributed_by_partner=[
-            PartnerContribution(partner=name, amount_usd=amount) for name, amount in by_partner
+            PartnerContribution(partner=name, amount_usd=amount)
+            for name, amount in (await contributed(session, None if at is None else at.day))
         ],
     )
+
+
+async def contributed(
+    session: AsyncSession, until: date | None = None
+) -> list[tuple[str, Decimal]]:
+    """What each partner has put in, less what was given back to them, by the end of `until`."""
+    put_in = await session.execute(
+        select(Partner.id, Partner.name, func.sum(Contribution.amount_usd))
+        .join(Partner, Contribution.partner_id == Partner.id)
+        .where(*([] if until is None else [Contribution.day <= until]))
+        .group_by(Partner.id, Partner.name)
+        .order_by(Partner.id)
+    )
+    returned = dict(
+        (
+            await session.execute(
+                select(FundTransfer.partner_id, func.sum(FundTransfer.amount_usd))
+                .where(
+                    ~FundTransfer.voided,
+                    FundTransfer.kind == TransferKind.CONTRIBUTION_RETURN,
+                    *([] if until is None else [FundTransfer.day <= until]),
+                )
+                .group_by(FundTransfer.partner_id)
+            )
+        ).all()
+    )
+    return [(name, amount - returned.get(pid, ZERO)) for pid, name, amount in put_in]
 
 
 async def flows(

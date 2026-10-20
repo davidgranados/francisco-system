@@ -31,13 +31,14 @@ from app.agent.loop import Agent, AnthropicLike
 from app.agent.telegram import ChatBot, button_data
 from app.agent.tools import ToolKind, find_tool
 from app.config import frozen_today, settings, today
-from app.domain.types import MovementKind
+from app.domain.types import Fund, MovementKind, TransferKind
 from app.models import (
     Contribution,
     ConversationMessage,
     EggMovement,
     ExchangeRate,
     Expense,
+    FundTransfer,
     InventoryCount,
     PendingAction,
     Purchase,
@@ -207,6 +208,13 @@ async def _no_bcv_rate() -> Decimal:
 
 # --- State ---------------------------------------------------------------------------------
 
+FUND_NAMES = {Fund.CAPITAL: "capital", Fund.PETTY_CASH: "caja_chica", Fund.SAVINGS: "ahorros"}
+MOVE_NAMES = {
+    TransferKind.BETWEEN_FUNDS: "traspaso",
+    TransferKind.CONTRIBUTION_RETURN: "devolver_aporte",
+    TransferKind.PROFIT_WITHDRAWAL: "retirar_utilidades",
+}
+
 
 def _money(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
@@ -226,6 +234,7 @@ async def snapshot(factory: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
         counts = await s.scalars(select(InventoryCount).order_by(InventoryCount.id))
         contributions = await s.scalars(select(Contribution).order_by(Contribution.id))
         settlements = await s.scalars(select(Settlement).order_by(Settlement.id))
+        moves = await s.scalars(select(FundTransfer).order_by(FundTransfer.id))
         rate = await s.scalar(select(ExchangeRate).where(ExchangeRate.day == today()))
         holdings = await boxes_with_eggs(s)
         open_actions = await s.scalar(
@@ -280,6 +289,17 @@ async def snapshot(factory: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
                 c.id: {"socio": c.partner.name, "monto_usd": _money(c.amount_usd)}
                 for c in contributions
             },
+            "movimientos": {
+                m.id: {
+                    "tipo": MOVE_NAMES[m.kind],
+                    "desde": FUND_NAMES[m.from_fund],
+                    "hacia": FUND_NAMES[m.to_fund] if m.to_fund else "socio",
+                    "socio": m.partner.name if m.partner else None,
+                    "monto_usd": _money(m.amount_usd),
+                    "anulada": m.voided,
+                }
+                for m in moves
+            },
             "cierres": {},
             "huevos": stock.total_eggs,
             "tasa_hoy": _money(rate.rate) if rate else None,
@@ -320,7 +340,11 @@ def changes(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
         losses[row["tipo"]] = losses.get(row["tipo"], 0) + row["huevos"]
     voided = [
         {"tipo": kind, "id": key}
-        for table, kind in (("ventas", "venta"), ("compras", "compra"))
+        for table, kind in (
+            ("ventas", "venta"),
+            ("compras", "compra"),
+            ("movimientos", "movimiento_dinero"),
+        )
         for key, row in after[table].items()
         if row["anulada"] and not before[table].get(key, {}).get("anulada", False)
     ]
@@ -332,6 +356,7 @@ def changes(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
         "conteos_nuevos": new("conteos"),
         "aportes_nuevos": new("aportes"),
         "cierres_nuevos": new("cierres"),
+        "movimientos_nuevos": new("movimientos"),
         "anuladas": voided,
         "gastos_devueltos": [
             key

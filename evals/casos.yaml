@@ -8,8 +8,8 @@
 #   menciona:   textos que la respuesta tiene que contener (sin importar mayúsculas ni tildes);
 #               una lista interna es "cualquiera de estos".
 #   pendiente:  true si la respuesta tiene que traer los botones Confirmar/Cancelar.
-#   estado:     lo que quedó en la base al final. Las listas *_nuevas, anuladas y
-#               gastos_devueltos que no se nombran tienen que quedar vacías.
+#   estado:     lo que quedó en la base al final. Las listas *_nuevas, *_nuevos, anuladas
+#               y gastos_devueltos que no se nombran tienen que quedar vacías.
 # Socios: Francisco (60 %, escribe por defecto) y Daniel (40 %). Semana de la Parte 9.
 
 # --- Ventas ----------------------------------------------------------------------------
@@ -715,6 +715,26 @@
     gastos_devueltos: [2]
     cierres_nuevos:
       - {reinversion_usd: "2.00", ganancia_neta_usd: "7.52", partes: {Francisco: "4.51", Daniel: "3.01"}}
+
+# --- Movimientos de dinero ---------------------------------------------------------------
+
+- id: devolver_parte_del_aporte
+  categoria: movimientos
+  fixture: semana_parte9_domingo
+  descripcion: Una devolución de aporte sale del capital con el botón Confirmar.
+  turnos:
+    - socio: devuélveme 50 dólares de lo que aporté
+      llamadas:
+        - herramienta: mover_dinero
+          args: {que: devolver_aporte, desde: capital, hacia: socio, socio: yo, monto_usd: "50"}
+      pendiente: true
+      menciona: ["confirmar"]
+    - boton: confirmar
+      menciona: ["50"]
+  estado:
+    pendientes_abiertos: 0
+    movimientos_nuevos:
+      - {tipo: devolver_aporte, desde: capital, hacia: socio, socio: Francisco, monto_usd: "50.00"}
 
 # --- Correcciones ----------------------------------------------------------------------
 

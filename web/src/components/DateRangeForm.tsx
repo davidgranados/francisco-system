@@ -1,9 +1,6 @@
-import { useForm } from '@tanstack/react-form'
 import { z } from 'zod'
 import type { DateRange } from '@/api/client'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { useAppForm } from '@/components/form'
 
 const rangeSchema = z
   .object({
@@ -15,13 +12,6 @@ const rangeSchema = z
     path: ['to'],
   })
 
-function errorText(errors: ReadonlyArray<unknown>): string | undefined {
-  const first = errors[0]
-  if (typeof first === 'string') return first
-  if (first && typeof first === 'object' && 'message' in first) return String(first.message)
-  return undefined
-}
-
 export function DateRangeForm({
   value,
   onSubmit,
@@ -31,7 +21,7 @@ export function DateRangeForm({
   onSubmit: (range: DateRange) => void
   submitLabel?: string
 }) {
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { from: value.from, to: value.to },
     validators: { onSubmit: rangeSchema },
     onSubmit: ({ value: submitted }) => onSubmit({ from: submitted.from, to: submitted.to }),
@@ -48,42 +38,17 @@ export function DateRangeForm({
       }}
     >
       {(['from', 'to'] as const).map((name) => (
-        <form.Field
+        <form.AppField
           key={name}
           name={name}
-          children={(field) => {
-            const message = errorText(field.state.meta.errors)
-            const errorId = `${field.name}-error`
-            return (
-              <div className="space-y-2">
-                <Label htmlFor={`range-${name}`}>{name === 'from' ? 'Desde' : 'Hasta'}</Label>
-                <Input
-                  id={`range-${name}`}
-                  type="date"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  aria-invalid={message ? true : undefined}
-                  aria-describedby={message ? errorId : undefined}
-                />
-                {message ? (
-                  <p id={errorId} role="alert" className="text-base font-semibold text-destructive">
-                    {message}
-                  </p>
-                ) : null}
-              </div>
-            )
-          }}
+          children={(field) => (
+            <field.TextField id={`range-${name}`} type="date" label={name === 'from' ? 'Desde' : 'Hasta'} />
+          )}
         />
       ))}
-      <form.Subscribe
-        selector={(state) => state.isSubmitting}
-        children={(isSubmitting) => (
-          <Button type="submit" size="lg" disabled={isSubmitting}>
-            {submitLabel}
-          </Button>
-        )}
-      />
+      <form.AppForm>
+        <form.SubmitButton label={submitLabel} />
+      </form.AppForm>
     </form>
   )
 }

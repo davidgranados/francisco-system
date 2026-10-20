@@ -1,15 +1,13 @@
-import { useForm } from '@tanstack/react-form'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { z } from 'zod'
 import { auth } from '@/api/client'
 import { queries } from '@/api/queries'
 import { lastName, useSession } from '@/app/session'
+import { useAppForm } from '@/components/form'
 import { ErrorNotice, LoadingNotice, QueryState } from '@/components/QueryState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 const codeSchema = z.object({
   code: z.string().regex(/^\d{6}$/, 'El código tiene 6 números. Escríbalos todos.'),
@@ -74,7 +72,7 @@ function CodeStep({
     onSuccess: (me) => session.signIn(me, name),
   })
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { code: '' },
     validators: { onSubmit: codeSchema },
     onSubmit: async ({ value }) => {
@@ -106,49 +104,25 @@ function CodeStep({
           void form.handleSubmit()
         }}
       >
-        <form.Field
+        <form.AppField
           name="code"
-          children={(field) => {
-            const issue = field.state.meta.errors[0]
-            const clientMessage =
-              typeof issue === 'string' ? issue : issue && 'message' in issue ? issue.message : null
-            const message = login.error?.message ?? clientMessage
-            return (
-              <div className="space-y-2">
-                <Label htmlFor="code">Código de 6 números</Label>
-                <Input
-                  id="code"
-                  className="h-20 text-center text-4xl tracking-[0.4em]"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  pattern="[0-9]*"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => {
-                    login.reset()
-                    field.handleChange(event.target.value.replace(/\D/g, ''))
-                  }}
-                  aria-invalid={message ? true : undefined}
-                  aria-describedby={message ? 'code-error' : undefined}
-                />
-                {message ? (
-                  <p id="code-error" role="alert" className="text-lg font-semibold text-destructive">
-                    {message}
-                  </p>
-                ) : null}
-              </div>
-            )
-          }}
-        />
-        <form.Subscribe
-          selector={(state) => state.isSubmitting}
-          children={(isSubmitting) => (
-            <Button type="submit" size="lg" className="h-20 w-full text-2xl" disabled={isSubmitting}>
-              {isSubmitting ? 'Entrando…' : 'Entrar'}
-            </Button>
+          children={(field) => (
+            <field.TextField
+              label="Código de 6 números"
+              className="h-20 text-center text-4xl tracking-[0.4em]"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              pattern="[0-9]*"
+              format={(value) => value.replace(/\D/g, '')}
+              onChange={() => login.reset()}
+              message={login.error?.message}
+            />
           )}
         />
+        <form.AppForm>
+          <form.SubmitButton label="Entrar" pendingLabel="Entrando…" className="h-20 w-full text-2xl" />
+        </form.AppForm>
       </form>
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <Button type="button" variant="outline" size="lg" disabled={resending} onClick={onResend}>

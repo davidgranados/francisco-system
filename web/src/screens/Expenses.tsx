@@ -1,10 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { queries } from '@/api/queries'
 import type { Expense } from '@/api/schemas'
 import { PageHeader } from '@/components/PageHeader'
 import { PagedList } from '@/components/PagedList'
-import { QueryState } from '@/components/QueryState'
 import { Amounts, Fact, RecordCard } from '@/components/RecordCard'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
@@ -54,31 +52,19 @@ export function ExpensesScreen() {
 }
 
 export function PendingExpensesScreen() {
-  const pending = useQuery(queries.pendingExpenses())
   return (
     <>
       <PageHeader title="Falta devolver a los socios" back={{ to: '/gastos', label: 'Todos los gastos' }} />
-      <QueryState query={pending}>
-        {(expenses) => {
-          const total = expenses.reduce((sum, expense) => sum + expense.amount_usd, 0)
-          return expenses.length === 0 ? (
-            <p className="rounded-xl border-2 border-dashed p-6 text-lg">
-              No se le debe nada a ningún socio.
-            </p>
-          ) : (
-            <>
-              <p className="mb-4 rounded-xl border-2 bg-card p-4 text-xl">
-                En total se les debe <strong>{formatUsd(total)}</strong>
-              </p>
-              <ul className="grid gap-4 md:grid-cols-2">
-                {expenses.map((expense) => (
-                  <ExpenseCard key={expense.id} expense={expense} />
-                ))}
-              </ul>
-            </>
-          )
-        }}
-      </QueryState>
+      <PagedList
+        options={queries.owedExpenses}
+        empty="No se le debe nada a ningún socio."
+        summary={(data) => (
+          <p className="mb-4 rounded-xl border-2 bg-card p-4 text-xl">
+            En total se les debe <strong>{formatUsd(data.owed_usd)}</strong>
+          </p>
+        )}
+        renderItem={(expense) => <ExpenseCard key={expense.id} expense={expense} />}
+      />
     </>
   )
 }

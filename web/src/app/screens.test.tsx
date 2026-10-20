@@ -259,3 +259,49 @@ describe('box sheet', () => {
     await waitFor(() => expect(calls.some((call) => call.path === '/api/v1/boxes/7/sheet')).toBe(true))
   })
 })
+
+describe('money owed to partners', () => {
+  const owed = (id: number) => ({
+    id,
+    day: '2026-10-04',
+    concept: `Gasto ${id}`,
+    amount_usd: '5.00',
+    rate: '215.50',
+    amount_bs: '1077.50',
+    paid_by_partner: 'Rosa',
+    reimbursed_on: null,
+    settled: false,
+  })
+
+  it('shows the total of every page and moves through the pages', async () => {
+    const user = userEvent.setup()
+    const calls = mockApi({
+      'GET /api/auth/me': { body: me },
+      'GET /api/v1/expenses/owed': (call) => {
+        const page = Number(call.search.get('page') ?? 1)
+        return { body: { ...pageOf([owed(page)], { total: 45, page }), owed_usd: '225.00' } }
+      },
+    })
+
+    renderApp('/gastos/pendientes')
+
+    expect(await screen.findByText('Gasto 1')).toBeInTheDocument()
+    expect(screen.getByText(/En total se les debe/)).toHaveTextContent('$ 225,00')
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(await screen.findByText('Gasto 2')).toBeInTheDocument()
+    expect(screen.getByText(/En total se les debe/)).toHaveTextContent('$ 225,00')
+    expect(calls.some((call) => call.path === '/api/v1/expenses/owed' && call.search.get('page') === '2')).toBe(true)
+  })
+
+  it('says nobody is owed anything when the list is empty', async () => {
+    mockApi({
+      'GET /api/auth/me': { body: me },
+      'GET /api/v1/expenses/owed': { body: { ...pageOf([]), owed_usd: '0.00' } },
+    })
+
+    renderApp('/gastos/pendientes')
+
+    expect(await screen.findByText('No se le debe nada a ningún socio.')).toBeInTheDocument()
+    expect(screen.queryByText(/En total se les debe/)).not.toBeInTheDocument()
+  })
+})

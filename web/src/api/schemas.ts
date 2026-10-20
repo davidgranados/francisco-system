@@ -93,6 +93,8 @@ export const expenseSchema = z.object({
   settled: z.boolean(),
 })
 
+export const owedExpensesSchema = pageOf(expenseSchema).extend({ owed_usd: money })
+
 export const contributionSchema = z.object({
   id: z.number().int(),
   partner: z.string(),

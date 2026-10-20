@@ -34,7 +34,7 @@ interface RouterContext {
   queryClient: QueryClient
 }
 
-const pageSearch = z.object({ page: z.coerce.number().int().min(1).catch(1) })
+const pageSearch = z.object({ page: z.coerce.number().int().min(1).default(1).catch(1) })
 const dayFormat = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const dayParam = dayFormat.optional().catch(undefined)
 const rangeSearch = z.object({
@@ -103,11 +103,7 @@ const purchasesRoute = listRoute('/compras', PurchasesScreen)
 
 const expensesRoute = listRoute('/gastos', ExpensesScreen)
 
-const pendingExpensesRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: '/gastos/pendientes',
-  component: PendingExpensesScreen,
-})
+const pendingExpensesRoute = listRoute('/gastos/pendientes', PendingExpensesScreen)
 
 const contributionsRoute = listRoute('/aportes', ContributionsScreen)
 

@@ -5,14 +5,16 @@ import type { Page } from '@/api/schemas'
 import { Pager } from '@/components/Pager'
 import { QueryState } from '@/components/QueryState'
 
-export function PagedList<T, Key extends QueryKey>({
+export function PagedList<P extends Page<unknown>, Key extends QueryKey>({
   options,
   empty,
+  summary,
   renderItem,
 }: {
-  options: (page: number) => UseQueryOptions<Page<T>, Error, Page<T>, Key>
+  options: (page: number) => UseQueryOptions<P, Error, P, Key>
   empty: string
-  renderItem: (item: T) => ReactNode
+  summary?: (data: P) => ReactNode
+  renderItem: (item: P['items'][number]) => ReactNode
 }) {
   const { page = 1 }: { page?: number } = useSearch({ strict: false })
   const navigate = useNavigate()
@@ -26,7 +28,10 @@ export function PagedList<T, Key extends QueryKey>({
           {data.items.length === 0 ? (
             <p className="rounded-xl border-2 border-dashed p-6 text-lg">{empty}</p>
           ) : (
-            <ul className="grid gap-4 md:grid-cols-2">{data.items.map(renderItem)}</ul>
+            <>
+              {summary?.(data)}
+              <ul className="grid gap-4 md:grid-cols-2">{data.items.map(renderItem)}</ul>
+            </>
           )}
           {data.total > data.page_size || page > 1 ? (
             <Pager page={page} total={data.total} pageSize={data.page_size} onPage={onPage} />

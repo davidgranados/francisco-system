@@ -14,6 +14,7 @@ from app.domain.errors import DomainError
 from app.domain.types import Fund
 from app.models import Expense, Settlement
 from app.services import funds, partners, rates
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class ExpenseInput(BaseModel):
@@ -184,6 +185,12 @@ async def unsettled_until(session: AsyncSession, day: date) -> list[Expense]:
         .order_by(Expense.day, Expense.id)
     )
     return list(rows)
+
+
+async def expenses_page(session: AsyncSession, request: PageRequest) -> Page[ExpenseView]:
+    query = select(Expense).order_by(Expense.day.desc(), Expense.id.desc())
+    rows, total = await fetch_page(session, query, request)
+    return Page[ExpenseView].of([expense_view(expense) for expense in rows], total, request)
 
 
 async def pending(session: AsyncSession) -> list[ExpenseView]:

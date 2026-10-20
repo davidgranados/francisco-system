@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import today
@@ -15,6 +15,7 @@ from app.domain.errors import DomainError
 from app.domain.types import Fund, TransferKind
 from app.models import FundTransfer
 from app.services import funds, partners
+from app.services.pages import Page, PageRequest, fetch_page
 from app.services.purchases import VoidInput
 
 CENT = Decimal("0.01")
@@ -124,8 +125,15 @@ async def void_transfer(session: AsyncSession, transfer_id: int, data: VoidInput
     return _view(transfer)
 
 
+def _newest_first() -> Select[tuple[FundTransfer]]:
+    return select(FundTransfer).order_by(FundTransfer.day.desc(), FundTransfer.id.desc())
+
+
 async def list_transfers(session: AsyncSession, limit: int = 20) -> list[TransferView]:
-    rows = await session.scalars(
-        select(FundTransfer).order_by(FundTransfer.day.desc(), FundTransfer.id.desc()).limit(limit)
-    )
+    rows = await session.scalars(_newest_first().limit(limit))
     return [_view(transfer) for transfer in rows]
+
+
+async def transfers_page(session: AsyncSession, request: PageRequest) -> Page[TransferView]:
+    rows, total = await fetch_page(session, _newest_first(), request)
+    return Page[TransferView].of([_view(transfer) for transfer in rows], total, request)

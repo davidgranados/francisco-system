@@ -68,4 +68,5 @@ async def test_a_business_refusal_is_a_422_in_spanish_and_writes_nothing(
     assert response.json() == {
         "detail": "No hay huevos en existencia. Primero registre una compra."
     }
-    assert (await client.get("/api/v1/sales?day=2026-10-12", headers=KEY)).json() == []
+    sales = await client.get("/api/v1/sales?day=2026-10-12", headers=KEY)
+    assert (sales.json()["items"], sales.json()["total"]) == ([], 0)

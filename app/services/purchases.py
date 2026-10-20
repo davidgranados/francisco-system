@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +15,7 @@ from app.models import Box, Purchase
 from app.services import funds, rates
 from app.services.boxes import BoxView, views_of
 from app.services.ledger import boxes_with_eggs
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class PurchaseInput(BaseModel):
@@ -170,11 +171,19 @@ async def void_purchase(session: AsyncSession, purchase_id: int, data: VoidInput
     return await _view(session, await _load(session, purchase_id))
 
 
-async def list_purchases(session: AsyncSession, limit: int = 20) -> list[PurchaseView]:
-    rows = await session.scalars(
+def _newest_first() -> Select[tuple[Purchase]]:
+    return (
         select(Purchase)
         .options(selectinload(Purchase.boxes))
         .order_by(Purchase.day.desc(), Purchase.id.desc())
-        .limit(limit)
     )
+
+
+async def list_purchases(session: AsyncSession, limit: int = 20) -> list[PurchaseView]:
+    rows = await session.scalars(_newest_first().limit(limit))
     return [await _view(session, purchase) for purchase in rows]
+
+
+async def purchases_page(session: AsyncSession, request: PageRequest) -> Page[PurchaseView]:
+    rows, total = await fetch_page(session, _newest_first(), request)
+    return Page[PurchaseView].of([await _view(session, p) for p in rows], total, request)

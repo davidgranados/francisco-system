@@ -2,11 +2,17 @@ from datetime import date
 
 from fastapi import APIRouter
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.services import rates
-from app.services.rates import RateView, SetRateInput
+from app.services.pages import Page
+from app.services.rates import ExchangeRateRow, RateView, SetRateInput
 
 router = APIRouter(prefix="/rates", tags=["tasa"])
+
+
+@router.get("")
+async def list_rates(session: Session, paging: Paging) -> Page[ExchangeRateRow]:
+    return await rates.rates_page(session, paging)
 
 
 @router.get("/{day}")

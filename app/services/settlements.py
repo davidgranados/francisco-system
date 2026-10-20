@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +24,7 @@ from app.services.expenses import (
     reimburse,
     unsettled_until,
 )
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class SettlementInput(BaseModel):
@@ -251,14 +252,22 @@ async def execute_settlement(session: AsyncSession, data: SettlementInput) -> Se
     return SettlementView(id=settlement.id, **preview.model_dump())
 
 
-async def list_settlements(session: AsyncSession, limit: int = 10) -> list[SettlementView]:
-    rows = await session.scalars(
+def _newest_first() -> Select[tuple[Settlement]]:
+    return (
         select(Settlement)
         .options(selectinload(Settlement.shares))
         .order_by(Settlement.day.desc(), Settlement.id.desc())
-        .limit(limit)
     )
+
+
+async def list_settlements(session: AsyncSession, limit: int = 10) -> list[SettlementView]:
+    rows = await session.scalars(_newest_first().limit(limit))
     return [await _stored_view(session, settlement) for settlement in rows]
+
+
+async def settlements_page(session: AsyncSession, request: PageRequest) -> Page[SettlementView]:
+    rows, total = await fetch_page(session, _newest_first(), request)
+    return Page[SettlementView].of([await _stored_view(session, s) for s in rows], total, request)
 
 
 async def _stored_view(session: AsyncSession, settlement: Settlement) -> SettlementView:

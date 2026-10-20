@@ -1,15 +1,16 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import Session
+from app.api.deps import Paging, Session
 from app.services import purchases
+from app.services.pages import Page
 from app.services.purchases import PurchaseInput, PurchaseView, RegisteredPurchase, VoidInput
 
 router = APIRouter(prefix="/purchases", tags=["compras"])
 
 
 @router.get("")
-async def list_purchases(session: Session, limit: int = 20) -> list[PurchaseView]:
-    return await purchases.list_purchases(session, limit)
+async def list_purchases(session: Session, paging: Paging) -> Page[PurchaseView]:
+    return await purchases.purchases_page(session, paging)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

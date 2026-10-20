@@ -12,6 +12,7 @@ from app.domain.errors import DomainError
 from app.domain.types import BoxStatus, MovementKind, PaymentMethod
 from app.models import Box, EggMovement, Sale
 from app.services.ledger import used_eggs
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class BoxView(BaseModel):
@@ -235,3 +236,13 @@ async def list_boxes(session: AsyncSession, include_settled: bool = False) -> li
     if not include_settled:
         query = query.where(Box.status != BoxStatus.SETTLED)
     return await views_of(session, list(await session.scalars(query)))
+
+
+async def boxes_page(
+    session: AsyncSession, request: PageRequest, include_settled: bool = False
+) -> Page[BoxView]:
+    query = select(Box).options(selectinload(Box.purchase)).order_by(Box.number.desc())
+    if not include_settled:
+        query = query.where(Box.status != BoxStatus.SETTLED)
+    rows, total = await fetch_page(session, query, request)
+    return Page[BoxView].of(await views_of(session, rows), total, request)

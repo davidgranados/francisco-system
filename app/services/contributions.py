@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import today
 from app.models import Contribution
 from app.services import partners
+from app.services.pages import Page, PageRequest, fetch_page
 
 
 class ContributionInput(BaseModel):
@@ -50,3 +51,9 @@ async def record_contribution(session: AsyncSession, data: ContributionInput) ->
 async def list_contributions(session: AsyncSession) -> list[ContributionView]:
     rows = await session.scalars(select(Contribution).order_by(Contribution.day, Contribution.id))
     return [_view(contribution) for contribution in rows]
+
+
+async def contributions_page(session: AsyncSession, request: PageRequest) -> Page[ContributionView]:
+    query = select(Contribution).order_by(Contribution.day.desc(), Contribution.id.desc())
+    rows, total = await fetch_page(session, query, request)
+    return Page[ContributionView].of([_view(contribution) for contribution in rows], total, request)

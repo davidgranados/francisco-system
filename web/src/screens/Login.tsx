@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { z } from 'zod'
-import { api } from '@/api/client'
+import { auth } from '@/api/client'
 import { queries } from '@/api/queries'
 import { ErrorNotice, LoadingNotice, QueryState } from '@/components/QueryState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -89,7 +89,7 @@ function CodeStep({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const login = useMutation({
-    mutationFn: (code: string) => api.login(name, code),
+    mutationFn: (code: string) => auth.login(name, code),
     onSuccess: (me) => {
       rememberName(name)
       queryClient.setQueryData(queries.me().queryKey, me)
@@ -190,7 +190,7 @@ export function LoginScreen() {
   const [notice, setNotice] = useState<string | null>(null)
 
   const sendCode = useMutation({
-    mutationFn: (person: string) => api.requestCode(person),
+    mutationFn: (person: string) => auth.requestCode(person),
     onSuccess: (_result, person) => {
       setName(person)
       setNotice(null)
@@ -198,7 +198,7 @@ export function LoginScreen() {
   })
 
   const resend = useMutation({
-    mutationFn: (person: string) => api.requestCode(person),
+    mutationFn: (person: string) => auth.requestCode(person),
     onSuccess: () => setNotice('Listo, le mandamos otro código. Use el más nuevo.'),
     onError: (error) => setNotice(error.message),
   })

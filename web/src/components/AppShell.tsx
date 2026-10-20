@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
-import { api } from '@/api/client'
+import { auth } from '@/api/client'
 import { queries } from '@/api/queries'
 import { signOut } from '@/app/session'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -19,7 +19,7 @@ export function AppShell() {
   }, [pathname])
 
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: auth.logout,
     onSettled: () => signOut(queryClient, router),
   })
 

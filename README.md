@@ -74,6 +74,8 @@ Para probar el bot en local:
 - Crea un bot tuyo con BotFather. Nunca uses el token de staging o de producción: al arrancar, la app le apunta el webhook de ese bot a tu máquina.
 - En `PUBLIC_URL` pon una URL pública con HTTPS, por ejemplo la de un túnel hacia `localhost:8000`.
 
+Paso a paso, con ngrok: [Probar el agente en local con tu propio bot y ngrok](#probar-el-agente-en-local-con-tu-propio-bot-y-ngrok).
+
 ### Los socios
 
 A `python -m app.seed` le pasas la lista completa de socios activos, cada uno como `Nombre:porcentaje:telegram_id`. Los porcentajes tienen que sumar 1. El id de Telegram es opcional, pero un socio sin id no puede usar el bot. Si lo corres otra vez con lo mismo, no cambia nada. Un socio que no esté en la lista queda inactivo.
@@ -351,6 +353,44 @@ Sirve para que alguien que no es socio pruebe el bot y la página web de staging
 Si después del deploy la app no arranca, revisa los logs del servicio. Lo más probable es que el valor esté mal escrito, o que se repita un nombre o un id.
 
 Para sacar a alguien, borra su `Nombre:id` de la variable y haz deploy otra vez.
+
+### Probar el agente en local con tu propio bot y ngrok
+
+Sirve para hablarle al agente desde Telegram mientras cambias el código en tu máquina, sin tocar staging. Usas un bot tuyo, y Telegram le manda los mensajes por HTTPS, así que tu `localhost:8000` necesita una URL pública. El plan gratis de ngrok te da una que no cambia: un dev domain como `algo-al-azar.ngrok-free.dev`. No lo puedes elegir, pero es el mismo cada vez que levantas el túnel, así que `PUBLIC_URL` se configura una sola vez.
+
+1. Crea una cuenta gratis en [ngrok.com](https://ngrok.com) e instala el agente (en macOS, `brew install ngrok`).
+2. En el dashboard de ngrok, copia tu authtoken y guárdalo:
+
+   ```bash
+   ngrok config add-authtoken <tu-authtoken>
+   ```
+
+3. En el dashboard, en **Domains**, copia tu dev domain, por ejemplo `algo-al-azar.ngrok-free.dev`.
+4. Crea un bot nuevo con BotFather, solo para ti, y su secreto, como en [El bot en Telegram](#1-el-bot-en-telegram). **Nunca uses el token del bot de staging (`@venta_de_huevos_staging_bot`) ni el de producción.** Al arrancar, la app le cambia el webhook a tu máquina, y ese bot deja de contestarles a todos los demás hasta el próximo deploy de su entorno.
+5. En tu `.env`:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=<el token de tu bot>
+   TELEGRAM_WEBHOOK_SECRET=<el secreto>
+   PUBLIC_URL=https://algo-al-azar.ngrok-free.dev
+   ANTHROPIC_API_KEY=<tu clave de la consola de Anthropic>
+   DEV_TELEGRAM_USERS=TuNombre:<tu id de Telegram>
+   ```
+
+   Sin `ANTHROPIC_API_KEY` el bot arranca, pero no hay agente que conteste. Con `DEV_TELEGRAM_USERS` puedes usar el bot aunque no estés cargado como socio. También puedes cargarte como socio con `python -m app.seed`.
+6. En una terminal, levanta el túnel:
+
+   ```bash
+   ngrok http 8000 --url https://algo-al-azar.ngrok-free.dev
+   ```
+
+7. En otra terminal, arranca la app (`uv run uvicorn app.main:app --reload`). Al arrancar, registra el webhook en Telegram con tu `PUBLIC_URL`.
+8. Para comprobar, abre `https://api.telegram.org/bot<TOKEN>/getWebhookInfo`. Tiene que mostrar tu dominio de ngrok. Después mándale `/start` a tu bot y pídele algo, por ejemplo "¿cuánto hay en caja chica?". Con `--reload`, cada cambio que guardas reinicia la app, y el siguiente mensaje ya usa el código nuevo.
+
+Lo que tienes que saber del plan gratis:
+- Tiene un límite de 20.000 pedidos y 1 GB por mes. Para probar el bot alcanza de sobra.
+- Si abres la URL en el navegador, ngrok primero muestra una página de aviso, y tienes que tocar el botón para seguir. A Telegram no le pasa eso, así que el bot funciona igual.
+- Si apagas ngrok, Telegram no tiene adónde mandar los mensajes y los guarda hasta 24 horas. Cuando lo vuelves a levantar, te llegan los que se acumularon.
 
 ## Cómo está organizado el código
 

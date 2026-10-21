@@ -298,6 +298,8 @@ Reglas:
 
 Para un usuario de desarrollo, "yo" no es ningún socio. Si dice "pagué yo", el bot le pregunta de qué socio habla. Úsalos en staging, nunca en producción, porque lo que anoten entra en las cuentas de verdad.
 
+Para agregar uno, sigue [Agregar un usuario de desarrollo en staging](#agregar-un-usuario-de-desarrollo-en-staging).
+
 ## Usar el bot
 
 Se le habla normal. Algunos ejemplos:
@@ -330,6 +332,25 @@ Para entrar:
 El bot solo puede escribirle a quien ya tocó «Iniciar» en el chat. Si un socio se desactiva, su sesión deja de servir en el siguiente pedido.
 
 La sesión es una cookie, y con ella solo se puede leer: cualquier cambio por la API sigue pidiendo `X-API-Key`. Las listas vienen por páginas (`?page=1&page_size=20`, hasta 100 por página). El código de la página está en `web/`, y su `README.md` dice cómo correrla en local. El `Dockerfile` la construye y la API la sirve en el mismo dominio.
+
+## Cómo hacer
+
+Guías paso a paso para cosas que se hacen de vez en cuando.
+
+### Agregar un usuario de desarrollo en staging
+
+Sirve para que alguien que no es socio pruebe el bot y la página web de staging.
+
+1. La persona le escribe a [@userinfobot](https://t.me/userinfobot) en Telegram y te pasa el número que le contesta. Ese es su id de Telegram.
+2. En Railway, abre el proyecto, elige el entorno **staging** y el servicio de la app. Ve a **Variables**.
+3. En `DEV_TELEGRAM_USERS`, agrega `Nombre:id` al final, separado de los demás con una coma. Por ejemplo, si estaba `David:820460532`, queda `David:820460532,Ana:111222333`. Si la variable no existe, créala.
+4. Railway deja el cambio pendiente, marcado en morado. Toca **Deploy** para aplicarlo y espera a que termine el deploy.
+5. La persona abre `@venta_de_huevos_staging_bot` y toca «Iniciar» o manda `/start`. Sin esto, el bot no le puede escribir, y el código para entrar a la web nunca le llega.
+6. Para comprobar, la persona le escribe algo al bot, por ejemplo "¿cuánto hay en caja chica?", y el bot le contesta. En la web, su nombre aparece en la lista para entrar.
+
+Si después del deploy la app no arranca, revisa los logs del servicio. Lo más probable es que el valor esté mal escrito, o que se repita un nombre o un id.
+
+Para sacar a alguien, borra su `Nombre:id` de la variable y haz deploy otra vez.
 
 ## Cómo está organizado el código
 

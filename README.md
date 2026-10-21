@@ -373,11 +373,11 @@ Sirve para hablarle al agente desde Telegram mientras cambias el código en tu m
    TELEGRAM_BOT_TOKEN=<el token de tu bot>
    TELEGRAM_WEBHOOK_SECRET=<el secreto>
    PUBLIC_URL=https://algo-al-azar.ngrok-free.dev
-   ANTHROPIC_API_KEY=<tu clave de la consola de Anthropic>
+   ANTHROPIC_API_KEY=<la clave que te da David>
    DEV_TELEGRAM_USERS=TuNombre:<tu id de Telegram>
    ```
 
-   Sin `ANTHROPIC_API_KEY` el bot arranca, pero no hay agente que conteste. Con `DEV_TELEGRAM_USERS` puedes usar el bot aunque no estés cargado como socio. También puedes cargarte como socio con `python -m app.seed`.
+   David te da un `ANTHROPIC_API_KEY` para tus pruebas en local. Pídeselo a él, guárdalo solo en tu `.env` y no lo compartas ni lo subas al repo. Sin `ANTHROPIC_API_KEY` el bot arranca, pero no hay agente que conteste. Con `DEV_TELEGRAM_USERS` puedes usar el bot aunque no estés cargado como socio. También puedes cargarte como socio con `python -m app.seed`.
 6. En una terminal, levanta el túnel:
 
    ```bash
